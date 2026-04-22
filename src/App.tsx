@@ -80,14 +80,18 @@ export default function App() {
     setLoading(true);
     try {
       const res = await fetch("/api/comments");
+      if (!res.ok) throw new Error(`Server responded with ${res.status}`);
       const data = await res.json();
       if (data && data.length > 0) {
         const analyzedData = await analyzeSentiment(data);
-        setComments(analyzedData.map(c => ({ ...c, brand: c.brand || "Marca Principal" })));
+        setComments(analyzedData.map(c => ({ ...c, brand: c.brand || "Main Brand" })));
+        setIsLive(true);
       }
-      setIsLive(true);
     } catch (error) {
-      console.error("Error fetching comments:", error);
+      console.warn("Backend API not reachable. Fallback to AI-generated simulation.", error);
+      // Fallback: Generate simulation data so the dashboard isn't empty on Netlify/Static hosting
+      const simulatedData = await generateBulkData("General Reputation", 20);
+      setComments(simulatedData);
       setIsLive(false);
     } finally {
       setLoading(false);
@@ -993,9 +997,9 @@ export default function App() {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <RefreshCw className="w-5 h-5 text-indigo-600" />
-                    Conexiones Externas (Make & Power BI)
+                    External Connections (Make & Power BI)
                   </CardTitle>
-                  <CardDescription>Configura la ingesta automática y el reporte ejecutivo externo</CardDescription>
+                  <CardDescription>Configure automatic data ingestion and external executive reporting</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -1005,8 +1009,8 @@ export default function App() {
                           <Zap className="w-5 h-5 text-orange-600" />
                         </div>
                         <div>
-                          <h4 className="font-bold text-sm">Webhook para MAKE</h4>
-                          <p className="text-xs text-slate-500">Envía datos desde Twitter, FB o Instagram</p>
+                          <h4 className="font-bold text-sm">Webhook for MAKE</h4>
+                          <p className="text-xs text-slate-500">Send data from Twitter, FB or Instagram</p>
                         </div>
                       </div>
                       <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 font-mono text-[10px] break-all relative group">
@@ -1021,9 +1025,9 @@ export default function App() {
                         </Button>
                       </div>
                       <ul className="text-[11px] space-y-1 text-slate-600 list-disc pl-4">
-                        <li>Usa el módulo "HTTP Request" en Make.</li>
-                        <li>Método: POST | Body: JSON.</li>
-                        <li>Campos: user, text, platform, brand.</li>
+                        <li>Use "HTTP Request" module in Make.</li>
+                        <li>Method: POST | Body: JSON.</li>
+                        <li>Fields: user, text, platform, brand.</li>
                       </ul>
                     </div>
 
@@ -1033,8 +1037,8 @@ export default function App() {
                           <BarChart3 className="w-5 h-5 text-yellow-600" />
                         </div>
                         <div>
-                          <h4 className="font-bold text-sm">Data Source para Power BI</h4>
-                          <p className="text-xs text-slate-500">Conecta métricas a reportes corporativos</p>
+                          <h4 className="font-bold text-sm">Data Source for Power BI</h4>
+                          <p className="text-xs text-slate-500">Connect metrics to corporate reports</p>
                         </div>
                       </div>
                       <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 font-mono text-[10px] break-all relative group">
@@ -1049,9 +1053,9 @@ export default function App() {
                         </Button>
                       </div>
                       <ul className="text-[11px] space-y-1 text-slate-600 list-disc pl-4">
-                        <li>En Power BI: "Obtener datos" → "Web".</li>
-                        <li>Pega la URL y selecciona "JSON".</li>
-                        <li>Actualización automática programable.</li>
+                        <li>In Power BI: "Get Data" → "Web".</li>
+                        <li>Paste the URL and select "JSON".</li>
+                        <li>Programmable automatic refresh.</li>
                       </ul>
                     </div>
                   </div>

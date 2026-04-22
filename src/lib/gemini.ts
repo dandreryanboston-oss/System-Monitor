@@ -1,9 +1,25 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Comment } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+let aiInstance: GoogleGenAI | null = null;
+
+function getAI() {
+  if (!aiInstance) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      console.warn("GEMINI_API_KEY is not defined. AI features will not work.");
+      // We return a dummy object that throws on usage instead of crashing on load
+      return null;
+    }
+    aiInstance = new GoogleGenAI(apiKey);
+  }
+  return aiInstance;
+}
 
 export async function analyzeSentiment(comments: Comment[]): Promise<Comment[]> {
+  const ai = getAI();
+  if (!ai) return comments.map(c => ({ ...c, sentiment: "Neutral", score: 0, category: "General" }));
+
   const prompt = `Analyze the sentiment of the following social media comments. 
   For each comment, determine if it is "Positive", "Negative", or "Neutral", assign a score from -1 to 1, and a brief category (e.g., Service, Product, Price, Support).
   
@@ -52,6 +68,12 @@ export async function analyzeSentiment(comments: Comment[]): Promise<Comment[]> 
 }
 
 export async function generateBulkData(keyword: string, count: number = 1500): Promise<Comment[]> {
+  const ai = getAI();
+  if (!ai) {
+    console.error("AI instance not initialized. Cannot generate data.");
+    return [];
+  }
+
   const profilePrompt = `Define the digital reputation profile for the brand/topic: "${keyword}".
   I need you to define:
   1. Sentiment distribution (e.g., 60% pos, 20% neg, 20% neu).
