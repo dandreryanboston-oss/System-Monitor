@@ -4,7 +4,7 @@ export interface Comment {
   text: string;
   platform: string;
   date: string;
-  sentiment?: "Positivo" | "Negativo" | "Neutral";
+  sentiment?: "Positive" | "Negative" | "Neutral";
   score?: number; // -1 to 1
   category?: string;
   brand?: string;

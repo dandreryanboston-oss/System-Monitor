@@ -21,12 +21,28 @@ export function Auth() {
 
     try {
       if (isSignUp) {
-        const { error } = await supabase.auth.signUp({ email, password });
+        const { data, error } = await supabase.auth.signUp({ 
+          email, 
+          password,
+          options: {
+            emailRedirectTo: window.location.origin
+          }
+        });
         if (error) throw error;
-        alert('Revisa tu email para confirmar la cuenta');
+        
+        // Si el usuario ya existe pero no está confirmado, Supabase a veces no lanza error en signUp
+        // pero el objeto user estará presente.
+        if (data.user && data.session === null) {
+          setError("Registration successful! NOTE: If the email link redirects to localhost, go to Supabase Dashboard > Auth > URL Configuration and set 'Site URL' to your current app URL. You can try logging in now.");
+        }
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
+        if (error) {
+          if (error.message.includes("Email not confirmed")) {
+            throw new Error("Email not confirmed yet. Please check your inbox or disable confirmation in Supabase Auth Settings.");
+          }
+          throw error;
+        }
       }
     } catch (err: any) {
       setError(err.message);
@@ -48,7 +64,7 @@ export function Auth() {
             Reputación Digital AI Pro
           </CardTitle>
           <CardDescription>
-            {isSignUp ? 'Crea una cuenta para comenzar' : 'Ingresa a tu panel de control'}
+            {isSignUp ? 'Create an account to get started' : 'Login to your control panel'}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -61,11 +77,11 @@ export function Auth() {
               </Alert>
             )}
             <div className="space-y-2">
-              <Label htmlFor="email">Correo Electrónico</Label>
+              <Label htmlFor="email">Email Address</Label>
               <Input
                 id="email"
                 type="email"
-                placeholder="ejemplo@correo.com"
+                placeholder="example@mail.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
@@ -73,7 +89,7 @@ export function Auth() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Contraseña</Label>
+              <Label htmlFor="password">Password</Label>
               <Input
                 id="password"
                 type="password"
@@ -91,16 +107,16 @@ export function Auth() {
               {loading ? (
                 <div className="flex items-center gap-2">
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Procesando...
+                  Processing...
                 </div>
               ) : (
                 isSignUp ? (
                   <div className="flex items-center gap-2">
-                    <UserPlus className="w-4 h-4" /> Registrarse
+                    <UserPlus className="w-4 h-4" /> Sign Up
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">
-                    <LogIn className="w-4 h-4" /> Iniciar Sesión
+                    <LogIn className="w-4 h-4" /> Login
                   </div>
                 )
               )}
@@ -109,16 +125,16 @@ export function Auth() {
         </CardContent>
         <CardFooter className="flex flex-col space-y-4 pt-2">
           <div className="text-sm text-center text-slate-500">
-            {isSignUp ? '¿Ya tienes cuenta?' : '¿No tienes cuenta?'}
+            {isSignUp ? 'Already have an account?' : "Don't have an account?"}
             <button
               onClick={() => setIsSignUp(!isSignUp)}
               className="ml-1 text-indigo-600 font-bold hover:underline"
             >
-              {isSignUp ? 'Inicia Sesión' : 'Regístrate aquí'}
+              {isSignUp ? 'Login here' : 'Register here'}
             </button>
           </div>
           <div className="text-[10px] text-center text-slate-400">
-            Protegido por Supabase Auth
+            Protected by Supabase Auth
           </div>
         </CardFooter>
       </Card>

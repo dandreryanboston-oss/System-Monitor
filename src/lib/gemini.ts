@@ -4,13 +4,13 @@ import { Comment } from "../types";
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export async function analyzeSentiment(comments: Comment[]): Promise<Comment[]> {
-  const prompt = `Analiza el sentimiento de los siguientes comentarios de redes sociales. 
-  Para cada comentario, determina si es "Positivo", "Negativo" o "Neutral", asigna un puntaje de -1 a 1, y una categoría breve (ej: Servicio, Producto, Precio, Soporte).
+  const prompt = `Analyze the sentiment of the following social media comments. 
+  For each comment, determine if it is "Positive", "Negative", or "Neutral", assign a score from -1 to 1, and a brief category (e.g., Service, Product, Price, Support).
   
-  Comentarios:
+  Comments:
   ${comments.map(c => `ID ${c.id}: ${c.text}`).join("\n")}
   
-  Responde estrictamente en formato JSON.`;
+  Respond strictly in JSON format.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -24,7 +24,7 @@ export async function analyzeSentiment(comments: Comment[]): Promise<Comment[]> 
             type: Type.OBJECT,
             properties: {
               id: { type: Type.NUMBER },
-              sentiment: { type: Type.STRING, enum: ["Positivo", "Negativo", "Neutral"] },
+              sentiment: { type: Type.STRING, enum: ["Positive", "Negative", "Neutral"] },
               score: { type: Type.NUMBER },
               category: { type: Type.STRING }
             },
@@ -40,7 +40,7 @@ export async function analyzeSentiment(comments: Comment[]): Promise<Comment[]> 
       const analysis = results.find((r: any) => r.id === comment.id);
       return {
         ...comment,
-        sentiment: analysis?.sentiment || "Neutral",
+        sentiment: (analysis?.sentiment as any) || "Neutral",
         score: analysis?.score || 0,
         category: analysis?.category || "General"
       };
@@ -52,14 +52,14 @@ export async function analyzeSentiment(comments: Comment[]): Promise<Comment[]> 
 }
 
 export async function generateBulkData(keyword: string, count: number = 1500): Promise<Comment[]> {
-  const profilePrompt = `Define el perfil de reputación digital para la marca/tema: "${keyword}".
-  Necesito que definas:
-  1. Distribución de sentimiento (ej: 60% pos, 20% neg, 20% neu).
-  2. Categorías principales (ej: Servicio, Precio, Calidad).
-  3. Plataformas dominantes.
-  4. 5 ejemplos de comentarios reales que representen este perfil.
+  const profilePrompt = `Define the digital reputation profile for the brand/topic: "${keyword}".
+  I need you to define:
+  1. Sentiment distribution (e.g., 60% pos, 20% neg, 20% neu).
+  2. Main categories (e.g., Service, Price, Quality).
+  3. Dominant platforms.
+  4. 5 examples of real comments representing this profile.
   
-  Responde en JSON:
+  Respond in JSON:
   {
     "pos_ratio": number,
     "neg_ratio": number,
@@ -83,14 +83,14 @@ export async function generateBulkData(keyword: string, count: number = 1500): P
     // Procedural generation based on AI profile
     for (let i = 0; i < count; i++) {
       const rand = Math.random();
-      let sentiment: "Positivo" | "Negativo" | "Neutral";
+      let sentiment: "Positive" | "Negative" | "Neutral";
       let score: number;
 
       if (rand < profile.pos_ratio) {
-        sentiment = "Positivo";
+        sentiment = "Positive";
         score = 0.5 + Math.random() * 0.5;
       } else if (rand < profile.pos_ratio + profile.neg_ratio) {
-        sentiment = "Negativo";
+        sentiment = "Negative";
         score = -1 + Math.random() * 0.5;
       } else {
         sentiment = "Neutral";
