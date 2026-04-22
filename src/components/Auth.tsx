@@ -1,0 +1,127 @@
+import React, { useState } from 'react';
+import { supabase } from '../lib/supabase';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
+import { Label } from '@/components/ui/label';
+import { ShieldCheck, LogIn, UserPlus, AlertCircle } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+
+export function Auth() {
+  const [loading, setLoading] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [isSignUp, setIsSignUp] = useState(false);
+
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+
+    try {
+      if (isSignUp) {
+        const { error } = await supabase.auth.signUp({ email, password });
+        if (error) throw error;
+        alert('Revisa tu email para confirmar la cuenta');
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+      }
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+      <Card className="w-full max-w-md shadow-xl border-slate-200">
+        <CardHeader className="space-y-1 text-center">
+          <div className="flex justify-center mb-4">
+            <div className="p-3 bg-indigo-100 rounded-2xl">
+              <ShieldCheck className="w-10 h-10 text-indigo-600" />
+            </div>
+          </div>
+          <CardTitle className="text-2xl font-bold tracking-tight">
+            Reputación Digital AI Pro
+          </CardTitle>
+          <CardDescription>
+            {isSignUp ? 'Crea una cuenta para comenzar' : 'Ingresa a tu panel de control'}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleAuth} className="space-y-4">
+            {error && (
+              <Alert variant="destructive" className="bg-red-50 border-red-200">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>Error</AlertTitle>
+                <AlertDescription className="text-xs">{error}</AlertDescription>
+              </Alert>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="email">Correo Electrónico</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="ejemplo@correo.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                className="bg-white"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="password">Contraseña</Label>
+              <Input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                className="bg-white"
+              />
+            </div>
+            <Button 
+              type="submit" 
+              className="w-full bg-indigo-600 hover:bg-indigo-700" 
+              disabled={loading}
+            >
+              {loading ? (
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Procesando...
+                </div>
+              ) : (
+                isSignUp ? (
+                  <div className="flex items-center gap-2">
+                    <UserPlus className="w-4 h-4" /> Registrarse
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <LogIn className="w-4 h-4" /> Iniciar Sesión
+                  </div>
+                )
+              )}
+            </Button>
+          </form>
+        </CardContent>
+        <CardFooter className="flex flex-col space-y-4 pt-2">
+          <div className="text-sm text-center text-slate-500">
+            {isSignUp ? '¿Ya tienes cuenta?' : '¿No tienes cuenta?'}
+            <button
+              onClick={() => setIsSignUp(!isSignUp)}
+              className="ml-1 text-indigo-600 font-bold hover:underline"
+            >
+              {isSignUp ? 'Inicia Sesión' : 'Regístrate aquí'}
+            </button>
+          </div>
+          <div className="text-[10px] text-center text-slate-400">
+            Protegido por Supabase Auth
+          </div>
+        </CardFooter>
+      </Card>
+    </div>
+  );
+}
