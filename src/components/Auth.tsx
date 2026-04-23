@@ -64,7 +64,7 @@ export function Auth() {
             Reputación Digital AI Pro
           </CardTitle>
           <CardDescription>
-            {isSignUp ? 'Create an account to get started' : 'Login to your control panel'}
+            {isSignUp ? 'Crea una cuenta para comenzar' : 'Inicia sesión en tu panel de control'}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -77,11 +77,11 @@ export function Auth() {
               </Alert>
             )}
             <div className="space-y-2">
-              <Label htmlFor="email">Email Address</Label>
+              <Label htmlFor="email">Correo Electrónico</Label>
               <Input
                 id="email"
                 type="email"
-                placeholder="example@mail.com"
+                placeholder="ejemplo@mail.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
@@ -89,7 +89,7 @@ export function Auth() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">Contraseña</Label>
               <Input
                 id="password"
                 type="password"
@@ -107,16 +107,16 @@ export function Auth() {
               {loading ? (
                 <div className="flex items-center gap-2">
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Processing...
+                  Procesando...
                 </div>
               ) : (
                 isSignUp ? (
                   <div className="flex items-center gap-2">
-                    <UserPlus className="w-4 h-4" /> Sign Up
+                    <UserPlus className="w-4 h-4" /> Registrarse
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">
-                    <LogIn className="w-4 h-4" /> Login
+                    <LogIn className="w-4 h-4" /> Entrar
                   </div>
                 )
               )}
@@ -125,16 +125,16 @@ export function Auth() {
         </CardContent>
         <CardFooter className="flex flex-col space-y-4 pt-2">
           <div className="text-sm text-center text-slate-500">
-            {isSignUp ? 'Already have an account?' : "Don't have an account?"}
+            {isSignUp ? '¿Ya tienes cuenta?' : "¿No tienes cuenta?"}
             <button
               onClick={() => setIsSignUp(!isSignUp)}
               className="ml-1 text-indigo-600 font-bold hover:underline"
             >
-              {isSignUp ? 'Login here' : 'Register here'}
+              {isSignUp ? 'Inicia sesión' : 'Regístrate aquí'}
             </button>
           </div>
           <div className="text-[10px] text-center text-slate-400">
-            Protected by Supabase Auth
+            Protegido por Supabase Auth
           </div>
         </CardFooter>
       </Card>
