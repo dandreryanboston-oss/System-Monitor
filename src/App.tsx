@@ -100,38 +100,40 @@ export default function App() {
 
   // Live Polling for Webhook Data (Make.com Integration)
   useEffect(() => {
-    // Only poll if we are not in a comparison or loading state to avoid overwrites
+    // Only poll if we are not in a loading state
     const pollInterval = setInterval(async () => {
       if (loading) return;
       
       try {
         const res = await fetch("/api/comments");
-        if (!res.ok) return; // Silent fail if no backend
+        if (!res.ok) return; 
         const serverData: Comment[] = await res.json();
         
-        if (!Array.isArray(serverData)) return;
+        if (!Array.isArray(serverData) || serverData.length === 0) return;
 
-        // Use functional state update to avoid dependency on 'comments'
         setComments(prev => {
           const existingIds = new Set(prev.map(c => c.id));
-          const newOnServer = serverData.filter(c => !existingIds.has(c.id));
+          // Sanitize incoming data and ensure it has a brand if missing
+          // Use the current monitorKeyword passed in dependency array
+          const sanitizedServerData = serverData.map(c => ({
+            ...c,
+            brand: c.brand || monitorKeyword || "Marca Principal"
+          }));
+          
+          const newOnServer = sanitizedServerData.filter(c => !existingIds.has(c.id));
           
           if (newOnServer.length === 0) return prev;
           
-          console.log(`Found ${newOnServer.length} new comments from server`);
-          // Note: In a real app we'd analyze sentiment here, 
-          // but for this dashboard we'll assume the server sent them analyzed or we'll analyze in a separate step
           return [...newOnServer, ...prev];
         });
         setIsLive(true);
       } catch (err) {
-        // console.error("Polling error:", err); // Keep console clean if dev-only
         setIsLive(false);
       }
     }, 20000); // 20s interval
 
     return () => clearInterval(pollInterval);
-  }, [loading]); // Stable dependency
+  }, [loading, monitorKeyword]); // Include monitorKeyword to avoid stale closure
 
   const handleGlobalAnalysis = async () => {
     if (!monitorKeyword) return;
@@ -184,9 +186,40 @@ export default function App() {
     }
   };
 
+  // Load state from sessionStorage on mount
   useEffect(() => {
-    fetchInitialData();
+    const savedComments = sessionStorage.getItem("dashboard_comments");
+    const savedMain = sessionStorage.getItem("dashboard_main_brand");
+    const savedCompare = sessionStorage.getItem("dashboard_compare_brand");
+    
+    if (savedMain) setMonitorKeyword(savedMain);
+    if (savedCompare) setCompareKeyword(savedCompare);
+
+    if (savedComments) {
+      try {
+        const parsed = JSON.parse(savedComments);
+        if (parsed && parsed.length > 0) {
+          setComments(parsed);
+          const BrandsInStorage = new Set(parsed.map((c: any) => c.brand).filter(Boolean));
+          if (BrandsInStorage.size > 1 || savedCompare) setIsComparing(true);
+        }
+      } catch (e) {
+        console.warn("Error loading persisted state", e);
+      }
+    } else {
+      fetchInitialData();
+    }
   }, []);
+
+  // Persist state to sessionStorage whenever it changes
+  useEffect(() => {
+    if (comments.length > 0) {
+      sessionStorage.setItem("dashboard_comments", JSON.stringify(comments));
+    }
+    if (monitorKeyword) sessionStorage.setItem("dashboard_main_brand", monitorKeyword);
+    if (compareKeyword) sessionStorage.setItem("dashboard_compare_brand", compareKeyword);
+    else sessionStorage.removeItem("dashboard_compare_brand");
+  }, [comments, monitorKeyword, compareKeyword]);
 
   const categories = useMemo(() => {
     const cats = new Set(comments.map(c => c.category || "General"));
@@ -194,8 +227,16 @@ export default function App() {
   }, [comments]);
 
   const brands = useMemo(() => {
-    return Array.from(new Set(comments.map(c => c.brand || "Desconocido")));
-  }, [comments]);
+    const set = new Set<string>();
+    if (monitorKeyword) set.add(monitorKeyword);
+    if (compareKeyword) set.add(compareKeyword);
+    comments.forEach(c => {
+      if (c.brand) set.add(c.brand);
+    });
+    // Never allow empty set
+    if (set.size === 0) return ["Marca Principal"];
+    return Array.from(set);
+  }, [comments, monitorKeyword, compareKeyword]);
 
   const calculateMetrics = (data: Comment[], name?: string, totalCommentsAcrossBrands: number = 0): ReputationMetrics => {
     if (data.length === 0) return {
@@ -262,10 +303,19 @@ export default function App() {
 
   const brandMetrics = useMemo(() => {
     const total = filteredComments.length;
-    return brands.map(brand => calculateMetrics(filteredComments.filter(c => c.brand === brand), brand, total));
+    return brands.map(brand => {
+      const brandComments = filteredComments.filter(c => c.brand === brand);
+      return calculateMetrics(brandComments, brand, total);
+    });
   }, [brands, filteredComments]);
 
-  const mainMetrics = brandMetrics[0] || calculateMetrics([]);
+  const mainMetrics = useMemo(() => {
+    return brandMetrics.find(m => m.brandName === monitorKeyword) || brandMetrics[0] || calculateMetrics([]);
+  }, [brandMetrics, monitorKeyword]);
+
+  const competitorMetrics = useMemo(() => {
+    return brandMetrics.find(m => m.brandName === compareKeyword) || brandMetrics[1];
+  }, [brandMetrics, compareKeyword]);
 
   const timelineData = useMemo(() => {
     const days: Record<string, any> = {};
@@ -512,83 +562,96 @@ export default function App() {
 
         {/* KPI Grid (Dynamic for Comparison) */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <Card className="shadow-lg border-indigo-100 bg-white group hover:border-indigo-300 transition-colors">
-            <CardHeader className="flex flex-row items-center justify-between pb-2 bg-indigo-50/30">
-              <CardTitle className="text-[11px] font-bold uppercase tracking-wider text-indigo-600">Índice de Reputación (NPS+)</CardTitle>
-              <Award className="w-5 h-5 text-indigo-600" />
-            </CardHeader>
-            <CardContent className="pt-4">
-              <div className="flex items-baseline justify-between">
-                <div className="text-4xl font-black text-slate-900">{mainMetrics.reputationScore}<span className="text-lg">%</span></div>
-                <TrendIndicator value={mainMetrics.trends.sentiment} />
-              </div>
-              <div className="mt-4 space-y-2">
-                <Progress value={mainMetrics.reputationScore} className="h-2 bg-slate-100" />
-                <div className="flex justify-between items-center text-[10px]">
-                  <span className="text-slate-400 font-medium">{mainMetrics.brandName}</span>
-                  {isComparing && (
-                    <Badge variant="outline" className="text-[9px] border-purple-200 text-purple-600">
-                      VS Competidor: {brandMetrics[1]?.reputationScore}%
-                    </Badge>
-                  )}
+          {[
+            { 
+              title: "Índice de Reputación (NPS+)", 
+              icon: Award, 
+              color: "indigo", 
+              key: "reputationScore", 
+              unit: "%",
+              desc: "Proporción de comentarios positivos frente al total."
+            },
+            { 
+              title: "Alcance Digital (Reach)", 
+              icon: Globe, 
+              color: "blue", 
+              key: "totalReach", 
+              format: (v: number) => (v / 1000).toFixed(1) + "k",
+              desc: "Número estimado de visualizaciones totales." 
+            },
+            { 
+              title: "Engagement rate", 
+              icon: Activity, 
+              color: "emerald", 
+              key: "engagementRate", 
+              unit: "%",
+              desc: "Nivel de interacción por cada 100 usuarios." 
+            },
+            { 
+              title: "Share of Voice (SOV)", 
+              icon: PieChartIcon, 
+              color: "purple", 
+              key: "sov", 
+              unit: "%",
+              desc: "Presencia en la conversación vs competidores."
+            }
+          ].map((kpi, i) => (
+            <Card key={i} className={`shadow-lg border-${kpi.color}-100 bg-white group hover:border-${kpi.color}-300 transition-all duration-300`}>
+              <CardHeader className={`flex flex-row items-center justify-between pb-2 bg-${kpi.color}-50/30`}>
+                <CardTitle className={`text-[11px] font-bold uppercase tracking-wider text-${kpi.color}-600`}>{kpi.title}</CardTitle>
+                <kpi.icon className={`w-5 h-5 text-${kpi.color}-600`} />
+              </CardHeader>
+              <CardContent className="pt-4">
+                {isComparing && competitorMetrics ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between border-b border-slate-50 pb-2">
+                       <div className="flex flex-col">
+                        <span className="text-[10px] text-slate-400 font-bold uppercase">{mainMetrics.brandName}</span>
+                        <div className="text-3xl font-black text-slate-900">
+                          {kpi.format ? kpi.format(mainMetrics[kpi.key as keyof ReputationMetrics] as number) : mainMetrics[kpi.key as keyof ReputationMetrics]}
+                          <span className="text-sm font-bold text-slate-400 ml-1">{kpi.unit}</span>
+                        </div>
+                       </div>
+                       <TrendIndicator value={mainMetrics.trends.sentiment || 0} />
+                    </div>
+                    <div className="flex items-center justify-between">
+                       <div className="flex flex-col">
+                        <span className="text-[10px] text-slate-400 font-bold uppercase">{competitorMetrics.brandName || "Competidor"}</span>
+                        <div className="text-2xl font-black text-indigo-500">
+                          {kpi.format ? kpi.format(competitorMetrics[kpi.key as keyof ReputationMetrics] as number) : competitorMetrics[kpi.key as keyof ReputationMetrics]}
+                          <span className="text-xs font-bold text-indigo-300 ml-0.5">{kpi.unit}</span>
+                        </div>
+                       </div>
+                       <TrendIndicator value={competitorMetrics.trends.sentiment || 0} />
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-baseline justify-between">
+                      <div className="text-4xl font-black text-slate-900">
+                        {kpi.format ? kpi.format(mainMetrics[kpi.key as keyof ReputationMetrics] as number) : mainMetrics[kpi.key as keyof ReputationMetrics]}
+                        <span className="text-lg">{kpi.unit}</span>
+                      </div>
+                      <TrendIndicator value={mainMetrics.trends.sentiment} />
+                    </div>
+                    <div className="mt-4">
+                      {kpi.key === "reputationScore" ? (
+                        <Progress value={mainMetrics.reputationScore} className="h-2 bg-slate-100" />
+                      ) : (
+                        <div className="h-2 w-full bg-slate-50 rounded-full overflow-hidden">
+                          <div className={`h-full bg-${kpi.color}-400 w-[70%]`} />
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+                <div className="mt-3 flex items-center gap-1.5 text-[9px] text-slate-400 italic">
+                  <Info className="w-2.5 h-2.5" />
+                  {kpi.desc}
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="shadow-lg border-blue-100 bg-white group hover:border-blue-300 transition-colors">
-            <CardHeader className="flex flex-row items-center justify-between pb-2 bg-blue-50/30">
-              <CardTitle className="text-[11px] font-bold uppercase tracking-wider text-blue-600">Alcance Digital (Reach)</CardTitle>
-              <Eye className="w-5 h-5 text-blue-600" />
-            </CardHeader>
-            <CardContent className="pt-4">
-              <div className="flex items-baseline justify-between">
-                <div className="text-4xl font-black text-slate-900">{(mainMetrics.totalReach / 1000).toFixed(1)}<span className="text-lg">k</span></div>
-                <TrendIndicator value={mainMetrics.trends.volume} />
-              </div>
-              <div className="mt-4 p-2 bg-blue-50 rounded-lg">
-                <p className="text-[10px] text-blue-700 font-bold flex items-center gap-1">
-                  <Globe className="w-3 h-3" />
-                  Menciones únicas estimadas
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="shadow-lg border-emerald-100 bg-white group hover:border-emerald-300 transition-colors">
-            <CardHeader className="flex flex-row items-center justify-between pb-2 bg-emerald-50/30">
-              <CardTitle className="text-[11px] font-bold uppercase tracking-wider text-emerald-600">Engagement Activo</CardTitle>
-              <Activity className="w-5 h-5 text-emerald-600" />
-            </CardHeader>
-            <CardContent className="pt-4">
-              <div className="flex items-baseline justify-between">
-                <div className="text-4xl font-black text-slate-900">{mainMetrics.engagementRate}<span className="text-lg">%</span></div>
-                <TrendIndicator value={Math.floor(Math.random() * 5)} />
-              </div>
-              <div className="mt-4 flex gap-1">
-                <div className="h-1 flex-1 bg-emerald-500 rounded-full" />
-                <div className="h-1 flex-1 bg-emerald-300 rounded-full" />
-                <div className="h-1 flex-1 bg-emerald-100 rounded-full" />
-              </div>
-              <p className="text-[10px] text-emerald-700 font-medium mt-1">Interacción por cada 100 usuarios</p>
-            </CardContent>
-          </Card>
-
-          <Card className="shadow-lg border-purple-100 bg-white group hover:border-purple-300 transition-colors">
-            <CardHeader className="flex flex-row items-center justify-between pb-2 bg-purple-50/30">
-              <CardTitle className="text-[11px] font-bold uppercase tracking-wider text-purple-600">Cuota de Conversación (SOV)</CardTitle>
-              <PieChartIcon className="w-5 h-5 text-purple-600" />
-            </CardHeader>
-            <CardContent className="pt-4">
-              <div className="flex items-baseline justify-between">
-                <div className="text-4xl font-black text-slate-900">{mainMetrics.sov}<span className="text-lg">%</span></div>
-                <div className="text-[10px] font-bold text-white bg-purple-600 px-2 py-0.5 rounded-full shadow-sm">
-                  {mainMetrics.sov > 50 ? 'DOMINANTE' : 'COMPITIENDO'}
-                </div>
-              </div>
-              <p className="text-[10px] text-purple-700 font-medium mt-4">Participación del mercado total</p>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          ))}
         </div>
 
         {/* Executive Insights Section */}
@@ -672,9 +735,10 @@ export default function App() {
                     <PieChartIcon className="w-5 h-5 text-indigo-600" />
                     Distribución de Sentimiento
                   </CardTitle>
+                  <CardDescription className="text-xs">Explicación: Desglose porcentual de la favorabilidad de la marca.</CardDescription>
                 </CardHeader>
-                <CardContent className="h-[300px]">
-                  <ResponsiveContainer width="100%" height="100%">
+                <CardContent className="h-[300px] min-h-[300px]">
+                  <ResponsiveContainer width="100%" height="100%" debounce={50}>
                     <PieChart>
                       <Pie
                         data={pieData}
@@ -691,12 +755,21 @@ export default function App() {
                         ))}
                       </Pie>
                       <Tooltip 
-                        contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '12px' }}
+                        formatter={(value: any, name: string) => [`${value} comentarios`, name]}
                       />
                       <Legend verticalAlign="bottom" height={36} iconType="circle" />
                     </PieChart>
                   </ResponsiveContainer>
                 </CardContent>
+                <CardFooter className="bg-slate-50 flex flex-col gap-2 p-3 border-t">
+                  <p className="text-[11px] text-slate-600">
+                    <strong>¿Cómo se calcula?</strong> Dividimos las menciones en 3 categorías mediante IA. El <strong>Índice de Reputación</strong> surge de los comentarios positivos.
+                  </p>
+                  <div className="flex gap-2">
+                    <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-200">Insight: {mainMetrics.sentimentDistribution.positive > mainMetrics.sentimentDistribution.negative ? 'Fortaleza detectada' : 'Atención requerida'}</Badge>
+                  </div>
+                </CardFooter>
               </Card>
 
               <Card className="shadow-sm border-slate-200 bg-white">
@@ -705,9 +778,10 @@ export default function App() {
                     <TrendingUp className="w-5 h-5 text-indigo-600" />
                     Tendencia de Conversación
                   </CardTitle>
+                  <CardDescription className="text-xs">Volumen diario de menciones positivas vs negativas.</CardDescription>
                 </CardHeader>
-                <CardContent className="h-[300px]">
-                  <ResponsiveContainer width="100%" height="100%">
+                <CardContent className="h-[300px] min-h-[300px]">
+                  <ResponsiveContainer width="100%" height="100%" debounce={50}>
                     <AreaChart data={timelineData}>
                       <defs>
                         <linearGradient id="colorPos" x1="0" y1="0" x2="0" y2="1">
@@ -723,7 +797,7 @@ export default function App() {
                       <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10}} />
                       <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10}} />
                       <Tooltip 
-                        contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '12px' }}
                       />
                       <Legend verticalAlign="top" align="right" height={36} iconType="circle" />
                       <Area type="monotone" dataKey="Positivo" stroke={COLORS.Positivo} strokeWidth={3} fillOpacity={1} fill="url(#colorPos)" />
@@ -731,6 +805,14 @@ export default function App() {
                     </AreaChart>
                   </ResponsiveContainer>
                 </CardContent>
+                <CardFooter className="bg-slate-50 flex items-center gap-2 p-3 border-t">
+                  <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center">
+                    <TrendingUp className="w-4 h-4 text-indigo-600" />
+                  </div>
+                  <p className="text-[11px] text-slate-600">
+                    <strong>Insight Agregado:</strong> El pico de menciones correlaciona con eventos de marca o crisis puntuales.
+                  </p>
+                </CardFooter>
               </Card>
             </div>
 
@@ -741,27 +823,42 @@ export default function App() {
                     <LayoutDashboard className="w-5 h-5 text-indigo-600" />
                     Heatmap: Engagement vs Sentimiento
                   </CardTitle>
+                  <CardDescription className="text-xs">Ubica la concentración de impacto. Eje X: Sentimiento | Eje Y: Alcance</CardDescription>
                 </CardHeader>
-                <CardContent className="h-[300px]">
+                <CardContent className="h-[300px] min-h-[300px] flex flex-col">
                   <div className="grid grid-cols-3 grid-rows-3 h-full gap-2 p-2 bg-slate-50 rounded-lg">
                     {[
-                      { label: "Bajo / Neg", color: "bg-red-100", val: 12 },
-                      { label: "Med / Neg", color: "bg-red-300", val: 45 },
-                      { label: "Alto / Neg", color: "bg-red-500", val: 89 },
-                      { label: "Bajo / Neu", color: "bg-slate-100", val: 23 },
-                      { label: "Med / Neu", color: "bg-slate-300", val: 67 },
-                      { label: "Alto / Neu", color: "bg-slate-400", val: 34 },
-                      { label: "Bajo / Pos", color: "bg-emerald-100", val: 56 },
-                      { label: "Med / Pos", color: "bg-emerald-300", val: 120 },
-                      { label: "Alto / Pos", color: "bg-emerald-500", val: 245 },
+                      { label: "Bajo / Neg", color: "bg-red-100", val: 12, desc: "Poco impacto, fácil de ignorar." },
+                      { label: "Med / Neg", color: "bg-red-300", val: 45, desc: "Requiere monitoreo constante." },
+                      { label: "Alto / Neg", color: "bg-red-500", val: 89, desc: "CRISIS: Alto alcance y repulsa." },
+                      { label: "Bajo / Neu", color: "bg-slate-100", val: 23, desc: "Ruido de fondo informativo." },
+                      { label: "Med / Neu", color: "bg-slate-300", val: 67, desc: "Menciones orgánicas estándar." },
+                      { label: "Alto / Neu", color: "bg-slate-400", val: 34, desc: "Viralidad informativa neutral." },
+                      { label: "Bajo / Pos", color: "bg-emerald-100", val: 56, desc: "Micro-comunidad satisfecha." },
+                      { label: "Med / Pos", color: "bg-emerald-300", val: 120, desc: "Embajadores de marca activos." },
+                      { label: "Alto / Pos", color: "bg-emerald-500", val: 245, desc: "ÉXITO: Viralidad positiva máxima." },
                     ].map((cell, i) => (
-                      <div key={i} className={`${cell.color} rounded-md flex flex-col items-center justify-center p-2 transition-transform hover:scale-105 cursor-default shadow-sm`}>
-                        <span className="text-[10px] font-bold uppercase opacity-60">{cell.label}</span>
-                        <span className="text-lg font-black">{cell.val}</span>
+                      <div 
+                        key={i} 
+                        title={cell.desc}
+                        className={`${cell.color} rounded-md flex flex-col items-center justify-center p-2 transition-all hover:scale-[1.03] hover:ring-2 hover:ring-white border border-transparent cursor-pointer group shadow-sm`}
+                      >
+                        <span className="text-[9px] font-bold uppercase opacity-60 text-center tracking-tighter leading-none">{cell.label}</span>
+                        <span className="text-xl font-black group-hover:scale-110 transition-transform">{cell.val}</span>
                       </div>
                     ))}
                   </div>
+                  <div className="flex justify-between items-center mt-3 px-1">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">← Negativo</span>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Evolución Estratégica</span>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Positivo →</span>
+                  </div>
                 </CardContent>
+                <CardFooter className="bg-indigo-50/50 p-3 border-t">
+                  <p className="text-[11px] text-indigo-900 leading-relaxed">
+                    <strong>Interpretación:</strong> Cuanto más oscura sea la celda en el extremo derecho superior, mayor es el éxito de su estrategia de comunicación. Las celdas rojas intensas indican focos de crisis con alto alcance.
+                  </p>
+                </CardFooter>
               </Card>
 
               <Card className="shadow-sm border-slate-200 bg-white">
@@ -770,27 +867,38 @@ export default function App() {
                     <BrainCircuit className="w-5 h-5 text-indigo-600" />
                     Nube de Temas (IA)
                   </CardTitle>
+                  <CardDescription className="text-xs">Tópicos recurrentes extraídos por algoritmos Gemini.</CardDescription>
                 </CardHeader>
-                <CardContent>
-                  <div className="flex flex-wrap gap-2 items-center justify-center h-[250px]">
+                <CardContent className="min-h-[250px]">
+                  <div className="flex flex-wrap gap-2 items-center justify-center h-[250px] content-center">
                     {[
-                      { text: "Servicio", size: "text-3xl", color: "text-indigo-600" },
-                      { text: "Precio", size: "text-xl", color: "text-slate-500" },
-                      { text: "Calidad", size: "text-2xl", color: "text-emerald-600" },
-                      { text: "Soporte", size: "text-lg", color: "text-slate-400" },
-                      { text: "Innovación", size: "text-2xl", color: "text-blue-600" },
-                      { text: "Garantía", size: "text-sm", color: "text-slate-400" },
-                      { text: "Envío", size: "text-xl", color: "text-orange-500" },
-                      { text: "App", size: "text-lg", color: "text-indigo-400" },
-                      { text: "Velocidad", size: "text-base", color: "text-slate-500" },
-                      { text: "Diseño", size: "text-2xl", color: "text-pink-500" },
+                      { text: "Servicio", size: "text-3xl", color: "text-indigo-600", desc: "El tema más mencionado hoy" },
+                      { text: "Precio", size: "text-xl", color: "text-slate-500", desc: "Percepción estable de costos" },
+                      { text: "Calidad", size: "text-2xl", color: "text-emerald-600", desc: "Principal fortaleza reportada" },
+                      { text: "Soporte", size: "text-lg", color: "text-slate-400", desc: "Bajo volumen de consultas" },
+                      { text: "Innovación", size: "text-2xl", color: "text-blue-600", desc: "Menciones en tech blogs" },
+                      { text: "Garantía", size: "text-sm", color: "text-slate-400", desc: "Tema residual" },
+                      { text: "Envío", size: "text-xl", color: "text-orange-500", desc: "Cuello de botella logístico" },
+                      { text: "App", size: "text-lg", color: "text-indigo-400", desc: "Críticas a la UX móvil" },
+                      { text: "Velocidad", size: "text-base", color: "text-slate-500", desc: "Atributo neutral" },
+                      { text: "Diseño", size: "text-2xl", color: "text-pink-500", desc: "Muy valorado en Instagram" },
                     ].map((tag, i) => (
-                      <span key={i} className={`${tag.size} ${tag.color} font-bold hover:opacity-80 cursor-default transition-opacity`}>
+                      <Badge 
+                        key={i} 
+                        variant="secondary"
+                        title={tag.desc}
+                        className={`${tag.size} ${tag.color} bg-white border-slate-100 hover:border-indigo-200 cursor-help transition-all shadow-sm h-fit py-1 px-3 mb-1`}
+                      >
                         {tag.text}
-                      </span>
+                      </Badge>
                     ))}
                   </div>
                 </CardContent>
+                <CardFooter className="bg-slate-50 p-3 border-t">
+                  <p className="text-[11px] text-slate-500 italic">
+                    <strong>Acción:</strong> Pase el cursor sobre cada etiqueta para ver el contexto semántico detectado por la IA.
+                  </p>
+                </CardFooter>
               </Card>
             </div>
           </TabsContent>
@@ -804,8 +912,8 @@ export default function App() {
                     Benchmarking de Atributos (Radar)
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="h-[400px]">
-                  <ResponsiveContainer width="100%" height="100%">
+                <CardContent className="h-[400px] min-h-[400px]">
+                  <ResponsiveContainer width="100%" height="100%" debounce={50}>
                     <RadarChart cx="50%" cy="50%" outerRadius="80%" data={radarData}>
                       <PolarGrid stroke="#e2e8f0" />
                       <PolarAngleAxis dataKey="subject" tick={{ fill: '#64748b', fontSize: 12 }} />
