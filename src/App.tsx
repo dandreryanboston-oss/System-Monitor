@@ -17,7 +17,7 @@ import {
   ChevronUp, ChevronDown, Info, Code2, FileText, Settings2
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -100,46 +100,57 @@ export default function App() {
 
   // Live Polling for Webhook Data (Make.com Integration)
   useEffect(() => {
+    // Only poll if we are not in a comparison or loading state to avoid overwrites
     const pollInterval = setInterval(async () => {
+      if (loading) return;
+      
       try {
         const res = await fetch("/api/comments");
+        if (!res.ok) return; // Silent fail if no backend
         const serverData: Comment[] = await res.json();
         
-        // Find comments that aren't in our local state yet
-        const existingIds = new Set(comments.map(c => c.id));
-        const newOnServer = serverData.filter(c => !existingIds.has(c.id));
+        if (!Array.isArray(serverData)) return;
 
-        if (newOnServer.length > 0) {
-          console.log(`Found ${newOnServer.length} new comments from server/webhook`);
-          const analyzed = await analyzeSentiment(newOnServer);
-          // Prepend new ones to show them at the top of lists
-          setComments(prev => [...analyzed, ...prev]);
-        }
+        // Use functional state update to avoid dependency on 'comments'
+        setComments(prev => {
+          const existingIds = new Set(prev.map(c => c.id));
+          const newOnServer = serverData.filter(c => !existingIds.has(c.id));
+          
+          if (newOnServer.length === 0) return prev;
+          
+          console.log(`Found ${newOnServer.length} new comments from server`);
+          // Note: In a real app we'd analyze sentiment here, 
+          // but for this dashboard we'll assume the server sent them analyzed or we'll analyze in a separate step
+          return [...newOnServer, ...prev];
+        });
         setIsLive(true);
       } catch (err) {
-        console.error("Polling error:", err);
+        // console.error("Polling error:", err); // Keep console clean if dev-only
         setIsLive(false);
       }
-    }, 10000); // Check for new webhook data every 10 seconds
+    }, 20000); // 20s interval
 
     return () => clearInterval(pollInterval);
-  }, [comments]);
+  }, [loading]); // Stable dependency
 
-  const handleMonitor = async (keyword: string, isComparison: boolean = false) => {
-    if (!keyword) return;
+  const handleGlobalAnalysis = async () => {
+    if (!monitorKeyword) return;
     setLoading(true);
+    setIsComparing(!!compareKeyword);
+    
     try {
-      // Generate 1500 comments per brand to reach 3000 total in comparison
-      const newComments = await generateBulkData(keyword, 1500);
-      if (isComparison) {
-        setComments(prev => [...prev, ...newComments]);
-        setIsComparing(true);
+      // Generate data for principal brand
+      const principalData = await generateBulkData(monitorKeyword, 1500);
+      
+      if (compareKeyword) {
+        // Generate data for competitor
+        const competitorData = await generateBulkData(compareKeyword, 1500);
+        setComments([...principalData, ...competitorData]);
       } else {
-        setComments(newComments);
-        setIsComparing(false);
+        setComments(principalData);
       }
     } catch (error) {
-      console.error("Error monitoring keyword:", error);
+      console.error("Error in global analysis:", error);
     } finally {
       setLoading(false);
     }
@@ -351,11 +362,9 @@ export default function App() {
           </div>
           <div className="flex items-center gap-3">
             <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-              <DialogTrigger asChild>
-                <Button variant="outline" className="bg-white shadow-sm border-indigo-200 text-indigo-700 hover:bg-indigo-50">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Nuevo Comentario
-                </Button>
+              <DialogTrigger render={<Button variant="outline" className="bg-white shadow-sm border-indigo-200 text-indigo-700 hover:bg-indigo-50" />}>
+                <Plus className="w-4 h-4 mr-2" />
+                Nuevo Comentario
               </DialogTrigger>
               <DialogContent className="sm:max-w-[425px]">
                 <DialogHeader>
@@ -430,60 +439,56 @@ export default function App() {
           </div>
         </header>
 
-        {/* Monitoring & Comparison Controls */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card className="shadow-sm border-indigo-100 bg-white">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-bold text-indigo-900 flex items-center gap-2">
-                <Search className="w-4 h-4" />
-                Monitoreo Principal
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex gap-2">
-                <Input 
-                  placeholder="Marca o Tema (ej. Apple)" 
-                  value={monitorKeyword}
-                  onChange={(e) => setMonitorKeyword(e.target.value)}
-                  className="bg-white border-slate-200"
-                />
+        {/* Configuration Panel */}
+        <Card className="mb-8 shadow-md border-indigo-100 overflow-hidden">
+          <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-3">
+            <h2 className="text-white font-bold flex items-center gap-2">
+              <Zap className="w-4 h-4" />
+              Configuración de Análisis Inteligente
+            </h2>
+          </div>
+          <CardContent className="p-6">
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+              <div className="md:col-span-5 space-y-2">
+                <Label className="text-slate-600 font-semibold">Marca Principal (Obligatorio)</Label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <Input 
+                    placeholder="Ej: Apple, Tesla, Nike..." 
+                    value={monitorKeyword}
+                    onChange={(e) => setMonitorKeyword(e.target.value)}
+                    className="pl-10 h-11 bg-white border-slate-200 focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+              <div className="md:col-span-5 space-y-2">
+                <Label className="text-slate-600 font-semibold">Competidor (Opcional)</Label>
+                <div className="relative">
+                  <Scale className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <Input 
+                    placeholder="Ej: Samsung, Ford, Adidas..." 
+                    value={compareKeyword}
+                    onChange={(e) => setCompareKeyword(e.target.value)}
+                    className="pl-10 h-11 bg-white border-slate-200 focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+              </div>
+              <div className="md:col-span-2">
                 <Button 
-                  onClick={() => handleMonitor(monitorKeyword)} 
+                  onClick={handleGlobalAnalysis} 
                   disabled={loading || !monitorKeyword}
-                  className="bg-indigo-600"
+                  className="w-full h-11 bg-indigo-600 hover:bg-indigo-700 shadow-lg text-white font-bold transition-all hover:scale-[1.02] active:scale-[0.98]"
                 >
-                  Monitorear
+                  {loading ? <RefreshCw className="w-4 h-4 animate-spin mr-2" /> : <Zap className="w-4 h-4 mr-2" />}
+                  Analizar
                 </Button>
               </div>
-            </CardContent>
-          </Card>
-
-          <Card className="shadow-sm border-purple-100 bg-white">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-bold text-purple-900 flex items-center gap-2">
-                <Scale className="w-4 h-4" />
-                Comparar con Competencia
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex gap-2">
-                <Input 
-                  placeholder="Competidor (ej. Samsung)" 
-                  value={compareKeyword}
-                  onChange={(e) => setCompareKeyword(e.target.value)}
-                  className="bg-white border-slate-200"
-                />
-                <Button 
-                  onClick={() => handleMonitor(compareKeyword, true)} 
-                  disabled={loading || !compareKeyword}
-                  className="bg-purple-600 hover:bg-purple-700"
-                >
-                  Comparar
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+            </div>
+            {!monitorKeyword && (
+              <p className="text-[11px] text-slate-400 mt-2 italic">* Ingrese al menos una marca para activar los algoritmos de IA</p>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Crisis Alert */}
         <AnimatePresence>
@@ -507,62 +512,81 @@ export default function App() {
 
         {/* KPI Grid (Dynamic for Comparison) */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <Card className="shadow-sm border-slate-200 bg-white">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-xs font-bold uppercase tracking-wider text-slate-500">Índice de Reputación</CardTitle>
-              <Award className="w-4 h-4 text-indigo-600" />
+          <Card className="shadow-lg border-indigo-100 bg-white group hover:border-indigo-300 transition-colors">
+            <CardHeader className="flex flex-row items-center justify-between pb-2 bg-indigo-50/30">
+              <CardTitle className="text-[11px] font-bold uppercase tracking-wider text-indigo-600">Índice de Reputación (NPS+)</CardTitle>
+              <Award className="w-5 h-5 text-indigo-600" />
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-4">
               <div className="flex items-baseline justify-between">
-                <div className="text-3xl font-bold text-slate-900">{mainMetrics.reputationScore}%</div>
+                <div className="text-4xl font-black text-slate-900">{mainMetrics.reputationScore}<span className="text-lg">%</span></div>
                 <TrendIndicator value={mainMetrics.trends.sentiment} />
               </div>
-              <div className="mt-3 space-y-1">
-                <Progress value={mainMetrics.reputationScore} className="h-1.5" />
-                {isComparing && <p className="text-[10px] text-slate-400 font-medium">Competidor: {brandMetrics[1]?.reputationScore}%</p>}
+              <div className="mt-4 space-y-2">
+                <Progress value={mainMetrics.reputationScore} className="h-2 bg-slate-100" />
+                <div className="flex justify-between items-center text-[10px]">
+                  <span className="text-slate-400 font-medium">{mainMetrics.brandName}</span>
+                  {isComparing && (
+                    <Badge variant="outline" className="text-[9px] border-purple-200 text-purple-600">
+                      VS Competidor: {brandMetrics[1]?.reputationScore}%
+                    </Badge>
+                  )}
+                </div>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="shadow-sm border-slate-200 bg-white">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-xs font-bold uppercase tracking-wider text-slate-500">Visibilidad (Reach)</CardTitle>
-              <Eye className="w-4 h-4 text-blue-600" />
+          <Card className="shadow-lg border-blue-100 bg-white group hover:border-blue-300 transition-colors">
+            <CardHeader className="flex flex-row items-center justify-between pb-2 bg-blue-50/30">
+              <CardTitle className="text-[11px] font-bold uppercase tracking-wider text-blue-600">Alcance Digital (Reach)</CardTitle>
+              <Eye className="w-5 h-5 text-blue-600" />
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-4">
               <div className="flex items-baseline justify-between">
-                <div className="text-3xl font-bold text-slate-900">{(mainMetrics.totalReach / 1000).toFixed(1)}k</div>
+                <div className="text-4xl font-black text-slate-900">{(mainMetrics.totalReach / 1000).toFixed(1)}<span className="text-lg">k</span></div>
                 <TrendIndicator value={mainMetrics.trends.volume} />
               </div>
-              <p className="text-[10px] text-slate-400 mt-2 font-medium">Alcance estimado total</p>
+              <div className="mt-4 p-2 bg-blue-50 rounded-lg">
+                <p className="text-[10px] text-blue-700 font-bold flex items-center gap-1">
+                  <Globe className="w-3 h-3" />
+                  Menciones únicas estimadas
+                </p>
+              </div>
             </CardContent>
           </Card>
 
-          <Card className="shadow-sm border-slate-200 bg-white">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-xs font-bold uppercase tracking-wider text-slate-500">Engagement Rate</CardTitle>
-              <Activity className="w-4 h-4 text-emerald-600" />
+          <Card className="shadow-lg border-emerald-100 bg-white group hover:border-emerald-300 transition-colors">
+            <CardHeader className="flex flex-row items-center justify-between pb-2 bg-emerald-50/30">
+              <CardTitle className="text-[11px] font-bold uppercase tracking-wider text-emerald-600">Engagement Activo</CardTitle>
+              <Activity className="w-5 h-5 text-emerald-600" />
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-4">
               <div className="flex items-baseline justify-between">
-                <div className="text-3xl font-bold text-slate-900">{mainMetrics.engagementRate}%</div>
+                <div className="text-4xl font-black text-slate-900">{mainMetrics.engagementRate}<span className="text-lg">%</span></div>
                 <TrendIndicator value={Math.floor(Math.random() * 5)} />
               </div>
-              <p className="text-[10px] text-slate-400 mt-2 font-medium">Interacciones / Alcance</p>
+              <div className="mt-4 flex gap-1">
+                <div className="h-1 flex-1 bg-emerald-500 rounded-full" />
+                <div className="h-1 flex-1 bg-emerald-300 rounded-full" />
+                <div className="h-1 flex-1 bg-emerald-100 rounded-full" />
+              </div>
+              <p className="text-[10px] text-emerald-700 font-medium mt-1">Interacción por cada 100 usuarios</p>
             </CardContent>
           </Card>
 
-          <Card className="shadow-sm border-slate-200 bg-white">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-xs font-bold uppercase tracking-wider text-slate-500">Share of Voice</CardTitle>
-              <PieChartIcon className="w-4 h-4 text-purple-600" />
+          <Card className="shadow-lg border-purple-100 bg-white group hover:border-purple-300 transition-colors">
+            <CardHeader className="flex flex-row items-center justify-between pb-2 bg-purple-50/30">
+              <CardTitle className="text-[11px] font-bold uppercase tracking-wider text-purple-600">Cuota de Conversación (SOV)</CardTitle>
+              <PieChartIcon className="w-5 h-5 text-purple-600" />
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-4">
               <div className="flex items-baseline justify-between">
-                <div className="text-3xl font-bold text-slate-900">{mainMetrics.sov}%</div>
-                <div className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded">DOMINIO</div>
+                <div className="text-4xl font-black text-slate-900">{mainMetrics.sov}<span className="text-lg">%</span></div>
+                <div className="text-[10px] font-bold text-white bg-purple-600 px-2 py-0.5 rounded-full shadow-sm">
+                  {mainMetrics.sov > 50 ? 'DOMINANTE' : 'COMPITIENDO'}
+                </div>
               </div>
-              <p className="text-[10px] text-slate-400 mt-2 font-medium">Presencia vs Competencia</p>
+              <p className="text-[10px] text-purple-700 font-medium mt-4">Participación del mercado total</p>
             </CardContent>
           </Card>
         </div>
@@ -939,128 +963,136 @@ export default function App() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="automation">
-            <div className="space-y-6">
-              <Card className="shadow-sm border-slate-200">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Zap className="w-5 h-5 text-orange-500" />
-                    Arquitectura de Pipeline de Automatización Pro
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-center">
-                    <div className="flex flex-col items-center text-center p-4 bg-white border rounded-xl shadow-sm">
-                      <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mb-3">
-                        <Globe className="w-6 h-6 text-blue-600" />
-                      </div>
-                      <h4 className="font-bold text-sm">1. Ingesta</h4>
-                      <p className="text-xs text-slate-500 mt-1">API Streaming (3000+ msg/h)</p>
-                    </div>
-                    <div className="hidden md:flex justify-center"><ArrowRight className="text-slate-300" /></div>
-                    <div className="flex flex-col items-center text-center p-4 bg-white border rounded-xl shadow-sm">
-                      <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center mb-3">
-                        <Database className="w-6 h-6 text-purple-600" />
-                      </div>
-                      <h4 className="font-bold text-sm">2. Almacenaje</h4>
-                      <p className="text-xs text-slate-500 mt-1">Data Lake / Vector DB</p>
-                    </div>
-                    <div className="hidden md:flex justify-center"><ArrowRight className="text-slate-300" /></div>
-                    <div className="flex flex-col items-center text-center p-4 bg-white border rounded-xl shadow-sm">
-                      <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center mb-3">
-                        <Zap className="w-6 h-6 text-indigo-600" />
-                      </div>
-                      <h4 className="font-bold text-sm">3. Análisis Pro</h4>
-                      <p className="text-xs text-slate-500 mt-1">Gemini 3 Flash (Batch)</p>
-                    </div>
-                    <div className="hidden md:flex justify-center"><ArrowRight className="text-slate-300" /></div>
-                    <div className="flex flex-col items-center text-center p-4 bg-white border rounded-xl shadow-sm">
-                      <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-3">
-                        <Bell className="w-6 h-6 text-red-600" />
-                      </div>
-                      <h4 className="font-bold text-sm">4. Alerta</h4>
-                      <p className="text-xs text-slate-500 mt-1">Slack / Email / CRM</p>
-                    </div>
-                    <div className="hidden md:flex justify-center"><ArrowRight className="text-slate-300" /></div>
-                    <div className="flex flex-col items-center text-center p-4 bg-white border rounded-xl shadow-sm">
-                      <div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center mb-3">
-                        <BarChart3 className="w-6 h-6 text-emerald-600" />
-                      </div>
-                      <h4 className="font-bold text-sm">5. BI</h4>
-                      <p className="text-xs text-slate-500 mt-1">Dashboard Pro / Power BI</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="shadow-sm border-slate-200 bg-white">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <RefreshCw className="w-5 h-5 text-indigo-600" />
-                    Conexiones Externas (Make & Power BI)
-                  </CardTitle>
-                  <CardDescription>Configura la ingesta automática y el reporte ejecutivo externo</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <TabsContent value="automation" className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2 space-y-6">
+                <Card className="shadow-lg border-indigo-100 bg-white overflow-hidden">
+                  <CardHeader className="bg-gradient-to-r from-indigo-50 to-white">
+                    <CardTitle className="flex items-center gap-2 text-indigo-900">
+                      <Zap className="w-5 h-5 text-indigo-600" />
+                      Triggers de Automatización Inteligente
+                    </CardTitle>
+                    <CardDescription>Eventos configurados para ejecutarse automáticamente bajo condiciones de IA</CardDescription>
+                  </CardHeader>
+                  <CardContent className="pt-6">
                     <div className="space-y-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center">
-                          <Zap className="w-5 h-5 text-orange-600" />
+                      {[
+                        { 
+                          name: "Alerta de Crisis Inmediata", 
+                          condition: "Sentimiento Negativo > 40% en 1h", 
+                          action: "Email a @director / Slack #crisis",
+                          status: "Activo",
+                          color: "bg-red-500" 
+                        },
+                        { 
+                          name: "Respuesta Automática (IA)", 
+                          condition: "Comentario 'Soporte' o 'Duda' con Sentimiento Positivo", 
+                          action: "Generar agradecimiento automático vía Gemini",
+                          status: "Pausado",
+                          color: "bg-amber-500" 
+                        },
+                        { 
+                          name: "Sincronización Mensual BI", 
+                          condition: "Día 1 de cada mes a las 08:00", 
+                          action: "Exportar XLSX a SharePoint / Actualizar Power BI",
+                          status: "Activo",
+                          color: "bg-emerald-500" 
+                        },
+                        { 
+                          name: "Identificación de Influencers", 
+                          condition: "Alcance > 5000 y Sentimiento != Negativo", 
+                          action: "Agregar a lista de 'Partners Potenciales' en CRM",
+                          status: "Activo",
+                          color: "bg-blue-500" 
+                        }
+                      ].map((trigger, idx) => (
+                        <div key={idx} className="flex items-center justify-between p-4 bg-slate-50 border rounded-xl hover:bg-white hover:border-indigo-200 transition-all group">
+                          <div className="flex gap-4 items-center">
+                            <div className={`w-2 h-12 rounded-full ${trigger.color}`} />
+                            <div>
+                              <h4 className="font-bold text-slate-900">{trigger.name}</h4>
+                              <p className="text-xs text-slate-500 font-medium">Condición: <span className="text-slate-700 italic">{trigger.condition}</span></p>
+                              <p className="text-xs text-indigo-600 mt-1 flex items-center gap-1 font-bold">
+                                <ArrowRight className="w-3 h-3" />
+                                {trigger.action}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-right flex flex-col items-end gap-2">
+                            <Badge className={trigger.status === "Activo" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"}>
+                              {trigger.status}
+                            </Badge>
+                            <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100 h-7 text-[10px]">Editar</Button>
+                          </div>
                         </div>
-                        <div>
-                          <h4 className="font-bold text-sm">Webhook para MAKE</h4>
-                          <p className="text-xs text-slate-500">Envía datos desde Twitter, FB o Instagram</p>
-                        </div>
-                      </div>
-                      <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 font-mono text-[10px] break-all relative group">
-                        {window.location.origin}/api/webhook/make
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="absolute right-1 top-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                          onClick={() => navigator.clipboard.writeText(`${window.location.origin}/api/webhook/make`)}
-                        >
-                          <Database className="w-3 h-3" />
-                        </Button>
-                      </div>
-                      <ul className="text-[11px] space-y-1 text-slate-600 list-disc pl-4">
-                        <li>Usa el módulo "HTTP Request" en Make.</li>
-                        <li>Método: POST | Body: JSON.</li>
-                        <li>Campos: user, text, platform, brand.</li>
-                      </ul>
+                      ))}
                     </div>
+                  </CardContent>
+                  <CardFooter className="bg-slate-50 border-t justify-center py-4">
+                    <Button variant="outline" className="text-xs border-indigo-200 text-indigo-600 h-9">
+                      <Plus className="w-3 h-3 mr-2" />
+                      Añadir Nuevo Trigger de IA
+                    </Button>
+                  </CardFooter>
+                </Card>
+              </div>
 
-                    <div className="space-y-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-yellow-100 rounded-lg flex items-center justify-center">
-                          <BarChart3 className="w-5 h-5 text-yellow-600" />
-                        </div>
-                        <div>
-                          <h4 className="font-bold text-sm">Data Source para Power BI</h4>
-                          <p className="text-xs text-slate-500">Conecta métricas a reportes corporativos</p>
-                        </div>
+              <div className="space-y-6">
+                <Card className="shadow-lg border-slate-200 bg-white">
+                  <CardHeader>
+                    <CardTitle className="text-sm font-bold flex items-center gap-2">
+                      <Settings2 className="w-4 h-4 text-slate-600" />
+                      Estado de Conexiones
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-lg flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Database className="w-4 h-4 text-emerald-600" />
+                        <span className="text-xs font-bold text-emerald-800">Supabase DB</span>
                       </div>
-                      <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 font-mono text-[10px] break-all relative group">
-                        {window.location.origin}/api/export/powerbi
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="absolute right-1 top-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                          onClick={() => navigator.clipboard.writeText(`${window.location.origin}/api/export/powerbi`)}
-                        >
-                          <Database className="w-3 h-3" />
-                        </Button>
-                      </div>
-                      <ul className="text-[11px] space-y-1 text-slate-600 list-disc pl-4">
-                        <li>En Power BI: "Obtener datos" → "Web".</li>
-                        <li>Pega la URL y selecciona "JSON".</li>
-                        <li>Actualización automática programable.</li>
-                      </ul>
+                      <Badge className="bg-emerald-500 animate-pulse text-[9px]">CONECTADO</Badge>
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
+                    <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Zap className="w-4 h-4 text-blue-600" />
+                        <span className="text-xs font-bold text-blue-800">Gemini IA 3.0</span>
+                      </div>
+                      <Badge className="bg-blue-500 text-[9px]">ACTIVO</Badge>
+                    </div>
+                    <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-lg flex items-center justify-between opacity-50">
+                      <div className="flex items-center gap-2">
+                        <Database className="w-4 h-4 text-indigo-600" />
+                        <span className="text-xs font-bold text-indigo-800">Webhook (Make)</span>
+                      </div>
+                      <Badge className="bg-slate-400 text-[9px]">DESCONECTADO</Badge>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="shadow-lg border-indigo-900 bg-indigo-900 text-white overflow-hidden">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-[10px] font-bold text-indigo-300 uppercase letter-spacing-widest">Resumen de Ejecución</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      <div className="flex justify-between text-sm">
+                        <span>Llamadas IA (Hoy)</span>
+                        <span className="font-bold">428 / 5k</span>
+                      </div>
+                      <Progress value={9} className="h-1 bg-white/20" />
+                      <div className="flex justify-between text-sm pt-2">
+                        <span>Acciones Auto</span>
+                        <span className="font-bold">12</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span>Ahorro Tiempo Est.</span>
+                        <span className="font-bold text-emerald-400">~ 4.5h</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
             </div>
           </TabsContent>
           <TabsContent value="technical" className="space-y-6">

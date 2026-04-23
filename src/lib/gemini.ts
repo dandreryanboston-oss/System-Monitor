@@ -5,13 +5,20 @@ let aiInstance: GoogleGenAI | null = null;
 
 function getAI() {
   if (!aiInstance) {
+    // In Vite, process.env.GEMINI_API_KEY is defined via vite.config.ts
     const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      console.warn("GEMINI_API_KEY is not defined. AI features will not work.");
-      // We return a dummy object that throws on usage instead of crashing on load
+    
+    if (!apiKey || apiKey === "undefined" || apiKey === "" || apiKey === "null") {
+      console.warn("GEMINI_API_KEY is not defined or invalid. AI features will not work.");
       return null;
     }
-    aiInstance = new GoogleGenAI({ apiKey });
+    
+    try {
+      aiInstance = new GoogleGenAI({ apiKey });
+    } catch (e) {
+      console.error("Failed to initialize GoogleGenAI:", e);
+      return null;
+    }
   }
   return aiInstance;
 }
@@ -30,7 +37,7 @@ export async function analyzeSentiment(comments: Comment[]): Promise<Comment[]> 
 
     try {
       const response = await ai.models.generateContent({
-        model: "gemini-1.5-flash",
+        model: "gemini-3-flash-preview",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -93,7 +100,7 @@ export async function analyzeSentiment(comments: Comment[]): Promise<Comment[]> 
   
     try {
       const response = await ai.models.generateContent({
-        model: "gemini-1.5-flash",
+        model: "gemini-3-flash-preview",
         contents: profilePrompt,
         config: { responseMimeType: "application/json" }
       });
