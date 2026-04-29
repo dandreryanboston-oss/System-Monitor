@@ -29,21 +29,36 @@ async function startServer() {
     }
 
     try {
-      const { data, error } = await supabase
-        .from("comments")
-        .select("*")
-        .order("date", { ascending: false })
-        .limit(100);
+      // Try to fetch, we don't know the exact column names yet if user changed them
+      // We'll try to order by created_at or date if they exist
+      let query = supabase.from("comments").select("*").limit(100);
+      
+      // We'll try to get the data first without specific ordering to avoid errors if column missing
+      const { data, error } = await query;
 
       if (error) throw error;
       
       if (data && data.length > 0) {
         console.info(`Supabase Activity: Successfully fetched ${data.length} comments.`);
+        
+        // Map fields to match the Comment interface used in frontend
+        const mappedData = data.map((item: any) => ({
+          ...item,
+          user: item.user || item.author || "@desconocido",
+          date: item.date || item.created_at || new Date().toISOString(),
+          // Ensure sentiment exists and is capitalized for UI
+          sentiment: item.sentiment ? (item.sentiment.charAt(0).toUpperCase() + item.sentiment.slice(1)) : "Neutral",
+          brand: item.brand || "Manual"
+        }));
+        
+        // Sort manually if we didn't do it in SQL
+        const sortedData = mappedData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        
+        return res.json(sortedData);
       } else {
         console.info("Supabase connected! However, your 'comments' table is currently empty.");
+        return res.json([]);
       }
-      
-      res.json(data || []);
     } catch (error: any) {
       const errorMessage = error?.message || error?.details || "Connection failed";
       console.info(`Supabase connection unavailable (${errorMessage}). Using Simulation Mode.`);

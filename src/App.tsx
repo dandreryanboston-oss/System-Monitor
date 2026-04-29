@@ -52,6 +52,7 @@ export default function App() {
   const [compareKeyword, setCompareKeyword] = useState("");
   const [isComparing, setIsComparing] = useState(false);
   const [isLive, setIsLive] = useState(false);
+  const [dbStatus, setDbStatus] = useState<"connected" | "disconnected" | "simulation">("simulation");
   
   // New comment state
   const [newCommentText, setNewCommentText] = useState("");
@@ -82,6 +83,10 @@ export default function App() {
       const res = await fetch("/api/comments");
       if (!res.ok) throw new Error(`Server responded with ${res.status}`);
       const data = await res.json();
+      
+      setDbStatus("connected");
+      setIsLive(true);
+
       if (data && Array.isArray(data) && data.length > 0) {
         const analyzedData = await analyzeSentiment(data);
         // FORCE brand assignment to prevent "Desconocido"
@@ -89,13 +94,14 @@ export default function App() {
           ...c, 
           brand: c.brand || monitorKeyword || "Marca Principal" 
         })));
-        setIsLive(true);
       } else {
-        // If data is empty, trigger the simulation fallback
-        throw new Error("No data received from backend");
+        // Connected but empty - use simulation for start but keep "Connected" status
+        const simulatedData = await generateBulkData(monitorKeyword || "Reputación General", 20);
+        setComments(simulatedData);
       }
     } catch (error) {
       console.warn("Backend API not reachable. Fallback to AI-generated simulation.", error);
+      setDbStatus("simulation");
       const simulatedData = await generateBulkData(monitorKeyword || "Reputación General", 20);
       setComments(simulatedData);
       setIsLive(false);
@@ -112,10 +118,18 @@ export default function App() {
       
       try {
         const res = await fetch("/api/comments");
-        if (!res.ok) return; 
+        if (!res.ok) {
+          setDbStatus("disconnected");
+          return; 
+        }
+        
+        setDbStatus("connected");
         const serverData: Comment[] = await res.json();
         
-        if (!Array.isArray(serverData) || serverData.length === 0) return;
+        if (!Array.isArray(serverData) || serverData.length === 0) {
+          setIsLive(true);
+          return;
+        }
 
         setComments(prev => {
           const existingIds = new Set(prev.map(c => c.id));
@@ -134,6 +148,7 @@ export default function App() {
         });
         setIsLive(true);
       } catch (err) {
+        setDbStatus("simulation");
         setIsLive(false);
       }
     }, 20000); // 20s interval
@@ -446,10 +461,16 @@ export default function App() {
             </h1>
             <div className="flex items-center gap-3 mt-1">
               <p className="text-slate-500">Análisis masivo (3000+ menciones) y benchmarking de marca</p>
-              <div className="flex items-center gap-2 bg-white px-2 py-0.5 rounded-full border border-slate-200 shadow-sm">
-                <div className={`w-2 h-2 rounded-full ${isLive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
+              <div className="flex items-center gap-2 bg-white px-3 py-1 rounded-full border border-slate-200 shadow-sm">
+                <div className={`w-2 h-2 rounded-full ${
+                  dbStatus === "connected" ? 'bg-emerald-500 animate-pulse' : 
+                  dbStatus === "simulation" ? 'bg-amber-500' : 'bg-red-500'
+                }`} />
                 <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
-                  {isLive ? 'Sincronización en Vivo' : 'Modo Offline'}
+                  Base de Datos: {
+                    dbStatus === "connected" ? 'Conectado (Supabase)' : 
+                    dbStatus === "simulation" ? 'Modo Simulación' : 'Desconectado'
+                  }
                 </span>
               </div>
             </div>
