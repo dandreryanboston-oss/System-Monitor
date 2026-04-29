@@ -82,15 +82,21 @@ export default function App() {
       const res = await fetch("/api/comments");
       if (!res.ok) throw new Error(`Server responded with ${res.status}`);
       const data = await res.json();
-      if (data && data.length > 0) {
+      if (data && Array.isArray(data) && data.length > 0) {
         const analyzedData = await analyzeSentiment(data);
-        setComments(analyzedData.map(c => ({ ...c, brand: c.brand || "Marca Principal" })));
+        // FORCE brand assignment to prevent "Desconocido"
+        setComments(analyzedData.map(c => ({ 
+          ...c, 
+          brand: c.brand || monitorKeyword || "Marca Principal" 
+        })));
         setIsLive(true);
+      } else {
+        // If data is empty, trigger the simulation fallback
+        throw new Error("No data received from backend");
       }
     } catch (error) {
       console.warn("Backend API not reachable. Fallback to AI-generated simulation.", error);
-      // Fallback: Generate simulation data so the dashboard isn't empty on Netlify/Static hosting
-      const simulatedData = await generateBulkData("Reputación General", 20);
+      const simulatedData = await generateBulkData(monitorKeyword || "Reputación General", 20);
       setComments(simulatedData);
       setIsLive(false);
     } finally {
@@ -228,17 +234,40 @@ export default function App() {
 
   const brands = useMemo(() => {
     const set = new Set<string>();
+    // Prioritize intended keywords first to ensure they are the main focus
     if (monitorKeyword) set.add(monitorKeyword);
     if (compareKeyword) set.add(compareKeyword);
+    
+    // Only add brands from comments if they are not generic placeholders
     comments.forEach(c => {
-      if (c.brand) set.add(c.brand);
+      if (c.brand && !["Desconocido", "Marca Principal", "General", "Desconocida", "webhook", "Webhook"].includes(c.brand)) {
+        set.add(c.brand);
+      }
     });
-    // Never allow empty set
-    if (set.size === 0) return ["Marca Principal"];
-    return Array.from(set);
+    
+    // Final fallback if everything is empty
+    if (set.size === 0) return [monitorKeyword || "Marca Principal"];
+    
+    // Convert to array and filter out nulls/undefined/empty
+    const result = Array.from(set).filter(b => b && b.trim() !== "");
+    
+    // Sort to keep monitorKeyword at the top, then compareKeyword
+    const sortedResult = result.sort((a, b) => {
+      if (a === monitorKeyword) return -1;
+      if (b === monitorKeyword) return 1;
+      if (a === compareKeyword) return -1;
+      if (b === compareKeyword) return 1;
+      return a.localeCompare(b);
+    });
+
+    return sortedResult;
   }, [comments, monitorKeyword, compareKeyword]);
 
   const calculateMetrics = (data: Comment[], name?: string, totalCommentsAcrossBrands: number = 0): ReputationMetrics => {
+    // If we have a name but no data, we still want to return a metric object with that name
+    // to avoid UI showing "Desconocido"
+    const safeName = name || "Marca Principal";
+    
     if (data.length === 0) return {
       totalMencions: 0,
       sentimentDistribution: { positive: 0, negative: 0, neutral: 0 },
@@ -250,7 +279,7 @@ export default function App() {
       sov: 0,
       influencerImpact: 0,
       isCrisis: false,
-      brandName: name,
+      brandName: safeName,
       trends: { sentiment: 0, volume: 0 }
     };
 
@@ -310,12 +339,27 @@ export default function App() {
   }, [brands, filteredComments]);
 
   const mainMetrics = useMemo(() => {
-    return brandMetrics.find(m => m.brandName === monitorKeyword) || brandMetrics[0] || calculateMetrics([]);
+    // Attempt to find by exact name match first
+    const match = brandMetrics.find(m => m.brandName === monitorKeyword);
+    if (match) return match;
+    // Fallback to the first available metric if it's not a placeholder
+    const validMetrics = brandMetrics.filter(m => m.brandName && !["Desconocido", "Marca Principal"].includes(m.brandName));
+    if (validMetrics.length > 0) return validMetrics[0];
+    
+    // Absolute fallback
+    return brandMetrics[0] || calculateMetrics([], monitorKeyword || "Marca Principal");
   }, [brandMetrics, monitorKeyword]);
 
   const competitorMetrics = useMemo(() => {
-    return brandMetrics.find(m => m.brandName === compareKeyword) || brandMetrics[1];
-  }, [brandMetrics, compareKeyword]);
+    if (!isComparing) return null;
+    // Search for specifically selected compare keyword
+    const match = brandMetrics.find(m => m.brandName === compareKeyword);
+    if (match) return match;
+    
+    // If not found, look for something that isn't the main brand
+    const otherBrands = brandMetrics.filter(m => m.brandName !== monitorKeyword && m.brandName !== "Desconocido");
+    return otherBrands.length > 0 ? otherBrands[0] : (brandMetrics[1] || null);
+  }, [brandMetrics, compareKeyword, isComparing, monitorKeyword]);
 
   const timelineData = useMemo(() => {
     const days: Record<string, any> = {};
@@ -601,12 +645,12 @@ export default function App() {
                 <CardTitle className={`text-[11px] font-bold uppercase tracking-wider text-${kpi.color}-600`}>{kpi.title}</CardTitle>
                 <kpi.icon className={`w-5 h-5 text-${kpi.color}-600`} />
               </CardHeader>
-              <CardContent className="pt-4">
+              <CardContent className="pt-4 min-h-[140px]">
                 {isComparing && competitorMetrics ? (
                   <div className="space-y-4">
                     <div className="flex items-center justify-between border-b border-slate-50 pb-2">
                        <div className="flex flex-col">
-                        <span className="text-[10px] text-slate-400 font-bold uppercase">{mainMetrics.brandName}</span>
+                        <span className="text-[10px] text-slate-400 font-bold uppercase">{mainMetrics.brandName || monitorKeyword || "Marca Principal"}</span>
                         <div className="text-3xl font-black text-slate-900">
                           {kpi.format ? kpi.format(mainMetrics[kpi.key as keyof ReputationMetrics] as number) : mainMetrics[kpi.key as keyof ReputationMetrics]}
                           <span className="text-sm font-bold text-slate-400 ml-1">{kpi.unit}</span>
@@ -616,7 +660,7 @@ export default function App() {
                     </div>
                     <div className="flex items-center justify-between">
                        <div className="flex flex-col">
-                        <span className="text-[10px] text-slate-400 font-bold uppercase">{competitorMetrics.brandName || "Competidor"}</span>
+                        <span className="text-[10px] text-slate-400 font-bold uppercase">{competitorMetrics.brandName || compareKeyword || "Competidor"}</span>
                         <div className="text-2xl font-black text-indigo-500">
                           {kpi.format ? kpi.format(competitorMetrics[kpi.key as keyof ReputationMetrics] as number) : competitorMetrics[kpi.key as keyof ReputationMetrics]}
                           <span className="text-xs font-bold text-indigo-300 ml-0.5">{kpi.unit}</span>
@@ -737,9 +781,10 @@ export default function App() {
                   </CardTitle>
                   <CardDescription className="text-xs">Explicación: Desglose porcentual de la favorabilidad de la marca.</CardDescription>
                 </CardHeader>
-                <CardContent className="h-[300px] min-h-[300px]">
-                  <ResponsiveContainer width="100%" height="100%" debounce={50}>
-                    <PieChart>
+                <CardContent className="h-[320px] min-h-[320px] w-full relative">
+                  <div className="absolute inset-0 p-4">
+                    <ResponsiveContainer width="100%" height="100%" debounce={100}>
+                      <PieChart>
                       <Pie
                         data={pieData}
                         cx="50%"
@@ -761,7 +806,8 @@ export default function App() {
                       <Legend verticalAlign="bottom" height={36} iconType="circle" />
                     </PieChart>
                   </ResponsiveContainer>
-                </CardContent>
+                </div>
+              </CardContent>
                 <CardFooter className="bg-slate-50 flex flex-col gap-2 p-3 border-t">
                   <p className="text-[11px] text-slate-600">
                     <strong>¿Cómo se calcula?</strong> Dividimos las menciones en 3 categorías mediante IA. El <strong>Índice de Reputación</strong> surge de los comentarios positivos.
@@ -780,9 +826,10 @@ export default function App() {
                   </CardTitle>
                   <CardDescription className="text-xs">Volumen diario de menciones positivas vs negativas.</CardDescription>
                 </CardHeader>
-                <CardContent className="h-[300px] min-h-[300px]">
-                  <ResponsiveContainer width="100%" height="100%" debounce={50}>
-                    <AreaChart data={timelineData}>
+                <CardContent className="h-[320px] min-h-[320px] w-full relative">
+                  <div className="absolute inset-0 p-4">
+                    <ResponsiveContainer width="100%" height="100%" debounce={100}>
+                      <AreaChart data={timelineData}>
                       <defs>
                         <linearGradient id="colorPos" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor={COLORS.Positivo} stopOpacity={0.3}/>
@@ -804,7 +851,8 @@ export default function App() {
                       <Area type="monotone" dataKey="Negativo" stroke={COLORS.Negativo} strokeWidth={3} fillOpacity={1} fill="url(#colorNeg)" />
                     </AreaChart>
                   </ResponsiveContainer>
-                </CardContent>
+                </div>
+              </CardContent>
                 <CardFooter className="bg-slate-50 flex items-center gap-2 p-3 border-t">
                   <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center">
                     <TrendingUp className="w-4 h-4 text-indigo-600" />
@@ -912,9 +960,10 @@ export default function App() {
                     Benchmarking de Atributos (Radar)
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="h-[400px] min-h-[400px]">
-                  <ResponsiveContainer width="100%" height="100%" debounce={50}>
-                    <RadarChart cx="50%" cy="50%" outerRadius="80%" data={radarData}>
+                <CardContent className="h-[420px] min-h-[420px] w-full relative">
+                  <div className="absolute inset-0 p-4">
+                    <ResponsiveContainer width="100%" height="100%" debounce={100}>
+                      <RadarChart cx="50%" cy="50%" outerRadius="80%" data={radarData}>
                       <PolarGrid stroke="#e2e8f0" />
                       <PolarAngleAxis dataKey="subject" tick={{ fill: '#64748b', fontSize: 12 }} />
                       <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: '#94a3b8', fontSize: 10 }} />
@@ -938,7 +987,8 @@ export default function App() {
                       <Legend />
                     </RadarChart>
                   </ResponsiveContainer>
-                </CardContent>
+                </div>
+              </CardContent>
               </Card>
             )}
 

@@ -2,9 +2,18 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
+import { createClient } from "@supabase/supabase-js";
+import * as dotenv from "dotenv";
+
+dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "https://mfpabfsovmrihxnnueda.supabase.co";
+const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "sb_publishable_LcF9CHbus2yiACGpogKhmQ_0zJBqFyz";
+
+const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
 
 async function startServer() {
   const app = express();
@@ -12,67 +21,94 @@ async function startServer() {
 
   app.use(express.json());
 
-  // Mock Dataset
-  const mockComments = [
-    { id: 1, user: "@tech_guru", text: "El nuevo servicio es increíble, muy rápido y eficiente.", platform: "Twitter", date: "2024-04-15T08:00:00Z" },
-    { id: 2, user: "@angry_customer", text: "Pésima atención al cliente, llevo esperando 3 horas.", platform: "Twitter", date: "2024-04-15T08:30:00Z" },
-    { id: 3, user: "@user123", text: "Me gusta la interfaz, pero faltan algunas funciones básicas.", platform: "Instagram", date: "2024-04-15T09:00:00Z" },
-    { id: 4, user: "@news_daily", text: "La empresa anuncia expansión regional tras éxito en ventas.", platform: "LinkedIn", date: "2024-04-15T09:15:00Z" },
-    { id: 5, user: "@hater99", text: "No entiendo cómo alguien usa esto, es una basura total.", platform: "Twitter", date: "2024-04-15T09:45:00Z" },
-    { id: 6, user: "@fan_boy", text: "Simplemente lo mejor que he probado este año.", platform: "Instagram", date: "2024-04-15T10:00:00Z" },
-    { id: 7, user: "@critico_dev", text: "La API tiene muchos bugs, no es confiable para producción.", platform: "Twitter", date: "2024-04-15T10:30:00Z" },
-    { id: 8, user: "@happy_user", text: "Gracias por solucionar mi problema tan rápido!", platform: "Twitter", date: "2024-04-15T11:00:00Z" },
-    { id: 9, user: "@troll_face", text: "Estafa total, no caigan en esto.", platform: "Facebook", date: "2024-04-15T11:15:00Z" },
-    { id: 10, user: "@biz_insider", text: "Reportan caída masiva del servicio en toda Latinoamérica.", platform: "Twitter", date: "2024-04-15T11:30:00Z" },
-  ];
-
-  // In-memory storage for comments (simulating a DB)
-  let dynamicComments = [...mockComments];
-
   // API Routes
-  app.get("/api/comments", (req, res) => {
-    res.json(dynamicComments);
+  app.get("/api/comments", async (req, res) => {
+    if (!supabase) {
+      console.info("Supabase not configured. Using AI Simulation Mode.");
+      return res.json([]);
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from("comments")
+        .select("*")
+        .order("date", { ascending: false })
+        .limit(100);
+
+      if (error) throw error;
+      
+      if (data && data.length > 0) {
+        console.info(`Supabase Activity: Successfully fetched ${data.length} comments.`);
+      } else {
+        console.info("Supabase connected! However, your 'comments' table is currently empty.");
+      }
+      
+      res.json(data || []);
+    } catch (error: any) {
+      const errorMessage = error?.message || error?.details || "Connection failed";
+      console.info(`Supabase connection unavailable (${errorMessage}). Using Simulation Mode.`);
+      res.json([]);
+    }
   });
 
   // Webhook for MAKE (Integromat)
-  // This allows receiving real data from social media automation flows
-  app.post("/api/webhook/make", (req, res) => {
-    const { user, text, platform, brand } = req.body;
+  app.post("/api/webhook/make", async (req, res) => {
+    const { user, text, platform, brand, sentiment, category } = req.body;
     
     if (!user || !text) {
       return res.status(400).json({ error: "Missing required fields: user, text" });
     }
 
     const newComment = {
-      id: Date.now(),
       user,
       text,
       platform: platform || "Webhook",
       brand: brand || "General",
+      sentiment: sentiment || "Neutral",
+      category: category || "General",
       date: new Date().toISOString(),
       likes: Math.floor(Math.random() * 100),
-      shares: Math.floor(Math.random() * 20)
+      shares: Math.floor(Math.random() * 20),
+      reach: Math.floor(Math.random() * 5000)
     };
 
-    dynamicComments = [newComment, ...dynamicComments];
-    console.log("New comment received via Webhook:", newComment.id);
-    
-    res.status(201).json({ 
-      status: "success", 
-      message: "Comment received and queued for analysis",
-      data: newComment 
-    });
+    try {
+      const { data, error } = await supabase
+        .from("comments")
+        .insert([newComment])
+        .select();
+
+      if (error) throw error;
+      
+      res.status(201).json({ 
+        status: "success", 
+        data: data?.[0] 
+      });
+    } catch (error) {
+      console.error("Webhook Supabase insert failed:", error);
+      res.status(500).json({ error: "Failed to save comment" });
+    }
   });
 
   // Export for Power BI
   // Provides a clean JSON endpoint that Power BI can consume as a Web Data Source
-  app.get("/api/export/powerbi", (req, res) => {
-    // In a real app, we would calculate metrics here or return raw data for PBI to process
-    res.json({
-      timestamp: new Date().toISOString(),
-      total_comments: dynamicComments.length,
-      data: dynamicComments
-    });
+  app.get("/api/export/powerbi", async (req, res) => {
+    try {
+      const { data, error } = await supabase
+        .from("comments")
+        .select("*")
+        .order("date", { ascending: false });
+
+      if (error) throw error;
+      
+      res.json({
+        timestamp: new Date().toISOString(),
+        total_comments: data?.length || 0,
+        data: data || []
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch data for export" });
+    }
   });
 
   app.get("/api/health", (req, res) => {
