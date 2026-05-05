@@ -53,6 +53,8 @@ export default function App() {
   const [isComparing, setIsComparing] = useState(false);
   const [isLive, setIsLive] = useState(false);
   const [dbStatus, setDbStatus] = useState<"connected" | "disconnected" | "simulation">("simulation");
+  const [totalRecordsInDb, setTotalRecordsInDb] = useState(0);
+  const [dbStats, setDbStats] = useState<any>(null);
   
   // New comment state
   const [newCommentText, setNewCommentText] = useState("");
@@ -79,28 +81,42 @@ export default function App() {
 
   const fetchInitialData = async () => {
     setLoading(true);
+    setDbStatus("disconnected");
     try {
+      // Direct verification via Supabase Client
+      const { data: testData, error: dbError } = await supabase
+        .from("social_mentions")
+        .select("id")
+        .limit(1);
+      
+      if (dbError) {
+        console.error("Supabase Connection Error:", dbError.message);
+        throw dbError;
+      }
+
       const res = await fetch("/api/comments");
       if (!res.ok) throw new Error(`Server responded with ${res.status}`);
       const data = await res.json();
       
+      // Fetch aggregated stats for verification
+      const statsRes = await fetch("/api/stats");
+      if (statsRes.ok) {
+          const statsData = await statsRes.json();
+          setTotalRecordsInDb(statsData.total || 0);
+          setDbStats(statsData);
+      }
+
       setDbStatus("connected");
       setIsLive(true);
 
       if (data && Array.isArray(data) && data.length > 0) {
-        const analyzedData = await analyzeSentiment(data);
-        // FORCE brand assignment to prevent "Desconocido"
-        setComments(analyzedData.map(c => ({ 
-          ...c, 
-          brand: c.brand || monitorKeyword || "Marca Principal" 
-        })));
+        setComments(data);
       } else {
-        // Connected but empty - use simulation for start but keep "Connected" status
-        const simulatedData = await generateBulkData(monitorKeyword || "Reputación General", 20);
-        setComments(simulatedData);
+        // Connected but table might be filtered or empty
+        setComments([]);
       }
-    } catch (error) {
-      console.warn("Backend API not reachable. Fallback to AI-generated simulation.", error);
+    } catch (error: any) {
+      console.warn("Database fallback to simulation. Check RLS policies.", error);
       setDbStatus("simulation");
       const simulatedData = await generateBulkData(monitorKeyword || "Reputación General", 20);
       setComments(simulatedData);
@@ -114,7 +130,7 @@ export default function App() {
   useEffect(() => {
     // Only poll if we are not in a loading state
     const pollInterval = setInterval(async () => {
-      if (loading) return;
+      if (loading || dbStatus === "simulation") return;
       
       try {
         const res = await fetch("/api/comments");
@@ -126,35 +142,23 @@ export default function App() {
         setDbStatus("connected");
         const serverData: Comment[] = await res.json();
         
-        if (!Array.isArray(serverData) || serverData.length === 0) {
-          setIsLive(true);
-          return;
-        }
+        if (!Array.isArray(serverData)) return;
 
         setComments(prev => {
-          const existingIds = new Set(prev.map(c => c.id));
-          // Sanitize incoming data and ensure it has a brand if missing
-          // Use the current monitorKeyword passed in dependency array
-          const sanitizedServerData = serverData.map(c => ({
-            ...c,
-            brand: c.brand || monitorKeyword || "Marca Principal"
-          }));
-          
-          const newOnServer = sanitizedServerData.filter(c => !existingIds.has(c.id));
+          const existingIds = new Set(prev.map(c => String(c.id)));
+          const newOnServer = serverData.filter(c => !existingIds.has(String(c.id)));
           
           if (newOnServer.length === 0) return prev;
-          
-          return [...newOnServer, ...prev];
+          return [...newOnServer, ...prev].slice(0, 500); // Keep buffer reasonable
         });
         setIsLive(true);
       } catch (err) {
-        setDbStatus("simulation");
         setIsLive(false);
       }
-    }, 20000); // 20s interval
+    }, 15000); // 15s interval
 
     return () => clearInterval(pollInterval);
-  }, [loading, monitorKeyword]); // Include monitorKeyword to avoid stale closure
+  }, [loading, dbStatus]);
 
   const handleGlobalAnalysis = async () => {
     if (!monitorKeyword) return;
@@ -162,18 +166,65 @@ export default function App() {
     setIsComparing(!!compareKeyword);
     
     try {
-      // Generate data for principal brand
-      const principalData = await generateBulkData(monitorKeyword, 1500);
-      
+      if (dbStatus === "connected") {
+        // REAL DATA MODE: Query Supabase for these brands
+        // We fetch up to 200 for each to keep performance good
+        const fetchBrand = async (k: string) => {
+          const { data, error } = await supabase
+            .from("social_mentions")
+            .select("*")
+            .ilike("brand", `%${k}%`)
+            .limit(500);
+          
+          if (error) throw error;
+          return (data || []).map(item => {
+            // Normalize sentiment values from DB
+            const rawSentiment = item.sentiment?.toLowerCase() || "neutral";
+            let sentiment: "Positivo" | "Negativo" | "Neutral" = "Neutral";
+            if (rawSentiment.startsWith("pos")) sentiment = "Positivo";
+            else if (rawSentiment.startsWith("neg")) sentiment = "Negativo";
+
+            return {
+              ...item,
+              id: item.id || Math.random(),
+              user: item.author || "@desconocido",
+              date: item.created_at || new Date().toISOString(),
+              sentiment,
+              brand: k,
+              likes: Number(item.likes) || 0,
+              shares: Number(item.shares) || 0,
+              reach: Number(item.reach) || 0,
+              score: Number(item.score) || 0
+            };
+          });
+        };
+
+        const principalData = await fetchBrand(monitorKeyword);
+        let combined = principalData;
+
+        if (compareKeyword) {
+          const competitorData = await fetchBrand(compareKeyword);
+          combined = [...principalData, ...competitorData];
+        }
+
+        if (combined.length > 0) {
+          setComments(combined);
+          return;
+        }
+        // If no results in DB for these brands, fallback to simulation but warn user
+        console.info("No records found in database for these brands. Using AI estimation.");
+      }
+
+      // SIMULATION / FALLBACK MODE
+      const principalData = await generateBulkData(monitorKeyword, 50);
       if (compareKeyword) {
-        // Generate data for competitor
-        const competitorData = await generateBulkData(compareKeyword, 1500);
+        const competitorData = await generateBulkData(compareKeyword, 50);
         setComments([...principalData, ...competitorData]);
       } else {
         setComments(principalData);
       }
     } catch (error) {
-      console.error("Error in global analysis:", error);
+      console.error("Error in analysis:", error);
     } finally {
       setLoading(false);
     }
@@ -298,18 +349,18 @@ export default function App() {
       trends: { sentiment: 0, volume: 0 }
     };
 
-    const pos = data.filter(c => c.sentiment === "Positivo").length;
-    const neg = data.filter(c => c.sentiment === "Negativo").length;
-    const neu = data.filter(c => c.sentiment === "Neutral").length;
+    const pos = data.filter(c => c.sentiment?.toLowerCase() === "positivo").length;
+    const neg = data.filter(c => c.sentiment?.toLowerCase() === "negativo").length;
+    const neu = data.filter(c => c.sentiment?.toLowerCase() === "neutral" || !c.sentiment).length;
 
     const reputationScore = Math.round((pos / (pos + neg || 1)) * 100);
     const nps = Math.round(((pos - neg) / data.length) * 100);
     
-    const totalEngagement = data.reduce((acc, curr) => acc + (curr.likes || 0) + (curr.shares || 0), 0);
+    const totalEngagement = data.reduce((acc, curr) => acc + (Number(curr.likes) || 0) + (Number(curr.shares) || 0), 0);
     const avgEngagement = Math.round(totalEngagement / data.length);
     
-    const totalReach = data.reduce((acc, curr) => acc + (curr.reach || 0), 0);
-    const engagementRate = Number(((totalEngagement / (totalReach || 1)) * 100).toFixed(2));
+    const totalReach = data.reduce((acc, curr) => acc + (Number(curr.reach) || 0), 0);
+    const engagementRate = totalReach > 0 ? Number(((totalEngagement / totalReach) * 100).toFixed(2)) : 0;
     
     const sov = totalCommentsAcrossBrands > 0 ? Math.round((data.length / totalCommentsAcrossBrands) * 100) : 100;
     
@@ -467,11 +518,21 @@ export default function App() {
                   dbStatus === "simulation" ? 'bg-amber-500' : 'bg-red-500'
                 }`} />
                 <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
-                  Base de Datos: {
-                    dbStatus === "connected" ? 'Conectado (Supabase)' : 
-                    dbStatus === "simulation" ? 'Modo Simulación' : 'Desconectado'
-                  }
+                  {dbStatus === "connected" ? (
+                    <span className="flex items-center gap-1">
+                      BASE DE DATOS: <span className="text-emerald-600">CONECTADO (SOCIAL_MENTIONS)</span> | {totalRecordsInDb.toLocaleString()} REGISTROS REALES
+                    </span>
+                  ) : dbStatus === "simulation" ? (
+                    'DATOS: MODO SIMULACIÓN AI (OFFLINE)'
+                  ) : (
+                    'DATOS: ERROR DE CONEXIÓN'
+                  )}
                 </span>
+                {dbStatus === "connected" && (
+                  <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-200 py-0 h-4">
+                    DB ACTIVA
+                  </Badge>
+                )}
               </div>
             </div>
           </div>
