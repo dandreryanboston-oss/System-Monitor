@@ -83,21 +83,18 @@ export default function App() {
     setLoading(true);
     setDbStatus("disconnected");
     try {
-      // Direct verification via Supabase Client
-      const { data: testData, error: dbError } = await supabase
+      // Direct query to social_mentions as suggested
+      const { data: serverData, error: dbError } = await supabase
         .from("social_mentions")
-        .select("id")
-        .limit(1);
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(100);
       
       if (dbError) {
         console.error("Supabase Connection Error:", dbError.message);
         throw dbError;
       }
 
-      const res = await fetch("/api/comments");
-      if (!res.ok) throw new Error(`Server responded with ${res.status}`);
-      const data = await res.json();
-      
       // Fetch aggregated stats for verification
       const statsRes = await fetch("/api/stats");
       if (statsRes.ok) {
@@ -109,10 +106,17 @@ export default function App() {
       setDbStatus("connected");
       setIsLive(true);
 
-      if (data && Array.isArray(data) && data.length > 0) {
-        setComments(data);
+      if (serverData && Array.isArray(serverData) && serverData.length > 0) {
+        // Map DB fields to UI Component fields
+        const mappedData = serverData.map((item: any) => ({
+          ...item,
+          id: item.id,
+          user: item.author || item.user || "@desconocido",
+          date: item.created_at || item.date || new Date().toISOString(),
+          sentiment: item.sentiment ? (item.sentiment.charAt(0).toUpperCase() + item.sentiment.slice(1)) : "Neutral",
+        }));
+        setComments(mappedData);
       } else {
-        // Connected but table might be filtered or empty
         setComments([]);
       }
     } catch (error: any) {
@@ -128,34 +132,47 @@ export default function App() {
 
   // Live Polling for Webhook Data (Make.com Integration)
   useEffect(() => {
-    // Only poll if we are not in a loading state
     const pollInterval = setInterval(async () => {
       if (loading || dbStatus === "simulation") return;
       
       try {
-        const res = await fetch("/api/comments");
-        if (!res.ok) {
-          setDbStatus("disconnected");
-          return; 
+        const { data: serverData, error: dbError } = await supabase
+          .from("social_mentions")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(100);
+
+        if (dbError) {
+           console.error("Polling error:", dbError);
+           return;
         }
         
         setDbStatus("connected");
-        const serverData: Comment[] = await res.json();
         
         if (!Array.isArray(serverData)) return;
 
+        // Map and update comments
+        const mappedData = serverData.map((item: any) => ({
+          ...item,
+          id: item.id,
+          user: item.author || item.user || "@desconocido",
+          date: item.created_at || item.date || new Date().toISOString(),
+          sentiment: item.sentiment ? (item.sentiment.charAt(0).toUpperCase() + item.sentiment.slice(1)) : "Neutral",
+        }));
+
         setComments(prev => {
           const existingIds = new Set(prev.map(c => String(c.id)));
-          const newOnServer = serverData.filter(c => !existingIds.has(String(c.id)));
+          const filteredNew = mappedData.filter(c => !existingIds.has(String(c.id)));
           
-          if (newOnServer.length === 0) return prev;
-          return [...newOnServer, ...prev].slice(0, 500); // Keep buffer reasonable
+          if (filteredNew.length === 0) return prev;
+          return [...filteredNew, ...prev].slice(0, 500); 
         });
         setIsLive(true);
-      } catch (err) {
+      } catch (error) {
+        console.error("Polling failed", error);
         setIsLive(false);
       }
-    }, 15000); // 15s interval
+    }, 10000); 
 
     return () => clearInterval(pollInterval);
   }, [loading, dbStatus]);
@@ -240,14 +257,51 @@ export default function App() {
       text: newCommentText,
       platform: newCommentPlatform,
       date: new Date().toISOString(),
-      brand: "Manual",
+      brand: monitorKeyword || "Manual",
       likes: 0,
-      shares: 0
+      shares: 0,
+      reach: Math.floor(Math.random() * 100) + 50
     };
 
     try {
       const analyzed = await analyzeSentiment([tempComment]);
-      setComments(prev => [analyzed[0], ...prev]);
+      const finalComment = analyzed[0];
+
+      if (dbStatus === "connected") {
+        // Persist to Supabase
+        const { data, error } = await supabase
+          .from("social_mentions")
+          .insert([{
+            author: finalComment.user,
+            text: finalComment.text,
+            platform: finalComment.platform,
+            brand: finalComment.brand,
+            sentiment: finalComment.sentiment?.toLowerCase(),
+            score: finalComment.score,
+            category: finalComment.category,
+            likes: finalComment.likes,
+            shares: finalComment.shares,
+            reach: finalComment.reach,
+            created_at: finalComment.date
+          }])
+          .select();
+
+        if (error) {
+          console.error("Supabase insert error:", error);
+        } else if (data && data[0]) {
+          finalComment.id = data[0].id;
+        }
+
+        // Refresh stats
+        const statsRes = await fetch("/api/stats");
+        if (statsRes.ok) {
+            const statsData = await statsRes.json();
+            setTotalRecordsInDb(statsData.total || 0);
+            setDbStats(statsData);
+        }
+      }
+
+      setComments(prev => [finalComment, ...prev]);
       setNewCommentText("");
       setNewCommentUser("");
       setIsDialogOpen(false);
