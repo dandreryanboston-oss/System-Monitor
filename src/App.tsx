@@ -506,31 +506,31 @@ export default function App() {
         {/* Header */}
         <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
+            <CardTitle className="text-3xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
               <ShieldCheck className="w-8 h-8 text-indigo-600" />
               Reputación Digital AI Pro
-            </h1>
+            </CardTitle>
             <div className="flex items-center gap-3 mt-1">
               <p className="text-slate-500">Análisis masivo (3000+ menciones) y benchmarking de marca</p>
-              <div className="flex items-center gap-2 bg-white px-3 py-1 rounded-full border border-slate-200 shadow-sm">
+              <div className="flex items-center gap-2 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100 shadow-sm">
                 <div className={`w-2 h-2 rounded-full ${
                   dbStatus === "connected" ? 'bg-emerald-500 animate-pulse' : 
                   dbStatus === "simulation" ? 'bg-amber-500' : 'bg-red-500'
                 }`} />
-                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                <span className="text-[10px] font-black uppercase tracking-widest text-emerald-700">
                   {dbStatus === "connected" ? (
                     <span className="flex items-center gap-1">
-                      BASE DE DATOS: <span className="text-emerald-600">CONECTADO (SOCIAL_MENTIONS)</span> | {totalRecordsInDb.toLocaleString()} REGISTROS REALES
+                      DATOS REALES CONECTADOS | {totalRecordsInDb.toLocaleString()} MENCIONES
                     </span>
                   ) : dbStatus === "simulation" ? (
-                    'DATOS: MODO SIMULACIÓN AI (OFFLINE)'
+                    'MODO SIMULACIÓN AI'
                   ) : (
-                    'DATOS: ERROR DE CONEXIÓN'
+                    'ERROR DE CONEXIÓN'
                   )}
                 </span>
                 {dbStatus === "connected" && (
-                  <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-200 py-0 h-4">
-                    DB ACTIVA
+                  <Badge className="bg-emerald-600 text-[8px] h-4 px-1.5 font-black uppercase tracking-tighter">
+                    VERIFICADO
                   </Badge>
                 )}
               </div>
@@ -690,89 +690,106 @@ export default function App() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {[
             { 
-              title: "Índice de Reputación (NPS+)", 
+              title: "Sentiment & NPS", 
               icon: Award, 
-              color: "indigo", 
+              color: "emerald", 
               key: "reputationScore", 
               unit: "%",
               desc: "Proporción de comentarios positivos frente al total."
             },
             { 
-              title: "Alcance Digital (Reach)", 
+              title: "Digital Reach", 
               icon: Globe, 
               color: "blue", 
               key: "totalReach", 
-              format: (v: number) => (v / 1000).toFixed(1) + "k",
-              desc: "Número estimado de visualizaciones totales." 
+              format: (v: number) => {
+                if (v >= 1000000) return (v / 1000000).toFixed(1) + "M";
+                if (v >= 1000) return (v / 1000).toFixed(1) + "k";
+                return v.toString();
+              },
+              desc: "Visualizaciones estimadas en redes sociales." 
             },
             { 
-              title: "Engagement rate", 
+              title: "Customer Engagement", 
               icon: Activity, 
-              color: "emerald", 
+              color: "orange", 
               key: "engagementRate", 
               unit: "%",
-              desc: "Nivel de interacción por cada 100 usuarios." 
+              desc: "Tasa de interacción por impacto visual." 
             },
             { 
-              title: "Share of Voice (SOV)", 
+              title: "Share of Voice", 
               icon: PieChartIcon, 
-              color: "purple", 
+              color: "indigo", 
               key: "sov", 
               unit: "%",
-              desc: "Presencia en la conversación vs competidores."
+              desc: "Dominio de marca en la conversación global."
             }
           ].map((kpi, i) => (
-            <Card key={i} className={`shadow-lg border-${kpi.color}-100 bg-white group hover:border-${kpi.color}-300 transition-all duration-300`}>
-              <CardHeader className={`flex flex-row items-center justify-between pb-2 bg-${kpi.color}-50/30`}>
-                <CardTitle className={`text-[11px] font-bold uppercase tracking-wider text-${kpi.color}-600`}>{kpi.title}</CardTitle>
-                <kpi.icon className={`w-5 h-5 text-${kpi.color}-600`} />
+            <Card key={i} className="shadow-sm border-slate-200 bg-white hover:shadow-md transition-shadow">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-500">{kpi.title}</CardTitle>
+                <kpi.icon className={`w-4 h-4 text-${kpi.color}-500 opacity-80`} />
               </CardHeader>
-              <CardContent className="pt-4 min-h-[140px]">
+              <CardContent className="pt-2">
                 {isComparing && competitorMetrics ? (
                   <div className="space-y-4">
-                    <div className="flex items-center justify-between border-b border-slate-50 pb-2">
-                       <div className="flex flex-col">
-                        <span className="text-[10px] text-slate-400 font-bold uppercase">{mainMetrics.brandName || monitorKeyword || "Marca Principal"}</span>
-                        <div className="text-3xl font-black text-slate-900">
+                    {/* Brand 1 (Main) */}
+                    <div className="flex items-center justify-between group">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          <div className={`w-1.5 h-1.5 rounded-full bg-${kpi.color}-500`} />
+                          <span className="text-[10px] font-bold text-slate-400 truncate uppercase">{mainMetrics.brandName || monitorKeyword}</span>
+                        </div>
+                        <div className="text-3xl font-bold tracking-tight text-slate-900 leading-none">
                           {kpi.format ? kpi.format(mainMetrics[kpi.key as keyof ReputationMetrics] as number) : mainMetrics[kpi.key as keyof ReputationMetrics]}
-                          <span className="text-sm font-bold text-slate-400 ml-1">{kpi.unit}</span>
+                          {kpi.unit && <span className="text-sm font-medium text-slate-400 ml-0.5">{kpi.unit}</span>}
                         </div>
-                       </div>
-                       <TrendIndicator value={mainMetrics.trends.sentiment || 0} />
+                      </div>
+                      <TrendIndicator value={mainMetrics.trends.sentiment || 0} />
                     </div>
-                    <div className="flex items-center justify-between">
-                       <div className="flex flex-col">
-                        <span className="text-[10px] text-slate-400 font-bold uppercase">{competitorMetrics.brandName || compareKeyword || "Competidor"}</span>
-                        <div className="text-2xl font-black text-indigo-500">
-                          {kpi.format ? kpi.format(competitorMetrics[kpi.key as keyof ReputationMetrics] as number) : competitorMetrics[kpi.key as keyof ReputationMetrics]}
-                          <span className="text-xs font-bold text-indigo-300 ml-0.5">{kpi.unit}</span>
+
+                    {/* Brand 2 (Competitor) */}
+                    <div className="pt-3 border-t border-slate-50 flex items-center justify-between group">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          <div className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+                          <span className="text-[10px] font-bold text-slate-400 truncate uppercase">{competitorMetrics.brandName || compareKeyword}</span>
                         </div>
-                       </div>
-                       <TrendIndicator value={competitorMetrics.trends.sentiment || 0} />
+                        <div className="text-2xl font-bold tracking-tight text-slate-500 leading-none">
+                          {kpi.format ? kpi.format(competitorMetrics[kpi.key as keyof ReputationMetrics] as number) : competitorMetrics[kpi.key as keyof ReputationMetrics]}
+                          {kpi.unit && <span className="text-xs font-medium text-slate-300 ml-0.5">{kpi.unit}</span>}
+                        </div>
+                      </div>
+                      <TrendIndicator value={competitorMetrics.trends.sentiment || 0} />
                     </div>
                   </div>
                 ) : (
-                  <>
-                    <div className="flex items-baseline justify-between">
-                      <div className="text-4xl font-black text-slate-900">
+                  <div className="flex flex-col gap-3">
+                    <div className="flex items-center justify-between">
+                      <div className="text-4xl font-black text-slate-900 tracking-tighter">
                         {kpi.format ? kpi.format(mainMetrics[kpi.key as keyof ReputationMetrics] as number) : mainMetrics[kpi.key as keyof ReputationMetrics]}
-                        <span className="text-lg">{kpi.unit}</span>
+                        {kpi.unit && <span className="text-lg font-medium text-slate-400 ml-1">{kpi.unit}</span>}
                       </div>
-                      <TrendIndicator value={mainMetrics.trends.sentiment} />
+                      <div className="p-2 bg-slate-50 rounded-lg">
+                        <TrendIndicator value={mainMetrics.trends.sentiment} />
+                      </div>
                     </div>
-                    <div className="mt-4">
-                      {kpi.key === "reputationScore" ? (
-                        <Progress value={mainMetrics.reputationScore} className="h-2 bg-slate-100" />
-                      ) : (
-                        <div className="h-2 w-full bg-slate-50 rounded-full overflow-hidden">
-                          <div className={`h-full bg-${kpi.color}-400 w-[70%]`} />
-                        </div>
-                      )}
+                    
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between text-[10px] font-medium text-slate-400">
+                        <span>EFICIENCIA</span>
+                        <span>{mainMetrics[kpi.key as keyof ReputationMetrics] as number}%</span>
+                      </div>
+                      <Progress 
+                        value={Number(mainMetrics[kpi.key as keyof ReputationMetrics])} 
+                        className={`h-1.5 bg-slate-100 [&>div]:bg-${kpi.color}-500`}
+                      />
                     </div>
-                  </>
+                  </div>
                 )}
-                <div className="mt-3 flex items-center gap-1.5 text-[9px] text-slate-400 italic">
-                  <Info className="w-2.5 h-2.5" />
+                <div className="mt-4 pt-3 border-t border-slate-50 flex items-center gap-1.5 text-[9px] text-slate-400 font-medium leading-tight">
+                  <Info className="w-3 h-3 text-slate-300" />
                   {kpi.desc}
                 </div>
               </CardContent>
@@ -780,48 +797,88 @@ export default function App() {
           ))}
         </div>
 
+
         {/* Executive Insights Section */}
-        <Card className="border-none bg-indigo-900 text-white shadow-xl overflow-hidden relative">
-          <div className="absolute top-0 right-0 p-8 opacity-10">
-            <BrainCircuit className="w-32 h-32" />
+        <Card className="border-none bg-slate-900 text-white shadow-xl overflow-hidden relative">
+          <div className="absolute top-0 right-0 p-8 opacity-5 pointer-events-none">
+            <BrainCircuit className="w-64 h-64" />
           </div>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-indigo-100">
-              <Zap className="w-5 h-5 text-yellow-400 fill-yellow-400" />
-              Insights Ejecutivos IA
+          <CardHeader className="border-b border-white/5 space-y-1">
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="bg-indigo-500/10 text-indigo-300 border-indigo-500/30 font-bold uppercase tracking-tighter text-[10px]">
+                Análisis Cognitivo Supabase
+              </Badge>
+              <div className="h-px flex-1 bg-white/5" />
+            </div>
+            <CardTitle className="text-2xl font-black tracking-tight flex items-center gap-3">
+              <Zap className="w-6 h-6 text-yellow-400 fill-yellow-400" />
+              Insights Estratégicos AI
             </CardTitle>
+            <CardDescription className="text-slate-400">Interpretación automatizada de los {totalRecordsInDb} datos procesados en tiempo real.</CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="space-y-2">
-                <h4 className="text-sm font-bold text-indigo-300 uppercase tracking-wider">Resumen de Percepción</h4>
-                <p className="text-sm leading-relaxed">
+          <CardContent className="p-8">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+              <div className="relative p-5 rounded-2xl bg-white/5 border border-white/5 hover:bg-white/[0.07] transition-colors group">
+                <div className="absolute -top-3 -left-3 w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                  <Eye className="w-4 h-4 text-white" />
+                </div>
+                <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-3 font-mono">Resumen de Percepción</h4>
+                <p className="text-sm leading-relaxed text-slate-200">
                   {mainMetrics.reputationScore > 70 
-                    ? `La marca mantiene una posición de liderazgo con un ${mainMetrics.reputationScore}% de favorabilidad. El NPS de ${mainMetrics.nps} indica una base sólida de promotores.`
-                    : `Se observa una vulnerabilidad en la reputación (${mainMetrics.reputationScore}%). Es crítico atender los focos de negatividad en la categoría de ${categories[1] || 'Servicio'}.`}
+                    ? `La marca proyecta una salud reputacional excepcional con un ${mainMetrics.reputationScore}% de sentimiento favorable. La lealtad del cliente es alta.`
+                    : mainMetrics.reputationScore > 40 
+                    ? `Percepción estable pero vulnerable. Un ${mainMetrics.reputationScore}% de favorabilidad sugiere la necesidad de reforzar campañas de fidelización.`
+                    : `Área de riesgo crítico detectada. Con solo ${mainMetrics.reputationScore}% de favorabilidad, se recomienda intervención inmediata en canales sociales.`}
                 </p>
+                <div className="mt-4 flex items-center gap-2 text-[10px] font-bold text-indigo-300/60 uppercase">
+                  <div className="w-1 h-1 rounded-full bg-indigo-400" />
+                  Monitorizado 24/7
+                </div>
               </div>
-              <div className="space-y-2">
-                <h4 className="text-sm font-bold text-indigo-300 uppercase tracking-wider">Análisis Competitivo</h4>
-                <p className="text-sm leading-relaxed">
-                  {isComparing 
-                    ? `${mainMetrics.brandName} lidera el Share of Voice con un ${mainMetrics.sov}%, superando a ${brandMetrics[1]?.brandName}. Sin embargo, el engagement rate es ${mainMetrics.engagementRate > (brandMetrics[1]?.engagementRate || 0) ? 'superior' : 'inferior'} al de la competencia.`
-                    : "Inicie una comparativa para obtener insights competitivos detallados y benchmarking de métricas."}
+
+              <div className="relative p-5 rounded-2xl bg-white/5 border border-white/5 hover:bg-white/[0.07] transition-colors">
+                <div className="absolute -top-3 -left-3 w-8 h-8 rounded-full bg-purple-500 flex items-center justify-center shadow-lg shadow-purple-500/20">
+                  <BarChart3 className="w-4 h-4 text-white" />
+                </div>
+                <h4 className="text-xs font-black text-purple-400 uppercase tracking-widest mb-3 font-mono">Análisis Competitivo</h4>
+                <p className="text-sm leading-relaxed text-slate-200">
+                  {isComparing && competitorMetrics 
+                    ? `${mainMetrics.brandName} lidera el Share of Voice con un ${mainMetrics.sov}%, superando a ${competitorMetrics.brandName}. Sin embargo, la tasa de engagement es ${mainMetrics.engagementRate > competitorMetrics.engagementRate ? 'superior' : 'inferior'} a la competencia.` 
+                    : `Sin competidor directo activo para benchmarking. La marca domina el total de la conversación analizada dentro de su categoría.`}
                 </p>
+                <div className="mt-4 flex items-center gap-2 text-[10px] font-bold text-purple-300/60 uppercase">
+                  <div className="w-1 h-1 rounded-full bg-purple-400" />
+                  Benchmarking Activo
+                </div>
               </div>
-              <div className="space-y-2">
-                <h4 className="text-sm font-bold text-indigo-300 uppercase tracking-wider">Acción Recomendada</h4>
-                <div className="flex items-start gap-3 bg-white/10 p-3 rounded-lg border border-white/10">
-                  <Info className="w-5 h-5 text-yellow-400 shrink-0 mt-0.5" />
-                  <p className="text-xs italic">
+
+              <div className="relative p-5 rounded-2xl bg-white/10 border border-indigo-500/30 hover:bg-white/[0.07] transition-colors shadow-inner">
+                <div className="absolute -top-3 -left-3 w-8 h-8 rounded-full bg-yellow-500 flex items-center justify-center shadow-lg shadow-yellow-500/20">
+                  <Zap className="w-4 h-4 text-white" />
+                </div>
+                <h4 className="text-xs font-black text-yellow-400 uppercase tracking-widest mb-3 font-mono">Acción Recomendada</h4>
+                <div className="flex items-start gap-3 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+                   <Info className="w-4 h-4 text-yellow-500 mt-1 flex-shrink-0" />
+                   <p className="text-xs font-medium text-yellow-100/90 leading-normal italic">
                     {mainMetrics.isCrisis 
-                      ? "ACTIVAR PROTOCOLO DE CRISIS: El volumen negativo supera el umbral de seguridad. Priorice respuesta en canales oficiales."
-                      : "OPTIMIZACIÓN: Incrementar inversión en contenido de alto engagement para capitalizar el alcance actual."}
-                  </p>
+                      ? "ACTIVAR PROTOCOLO DE CRISIS: Respuesta inmediata en canales de alto alcance y contención de sentimiento negativo vía direct message."
+                      : mainMetrics.engagementRate < 5 
+                      ? "OPTIMIZACIÓN: Incrementar inversión en contenido visual interactivo para capitalizar el alcance actual y subir el engagement."
+                      : "EXPANSIÓN: El sentimiento positivo actual permite el lanzamiento seguro de nuevas iniciativas de marca o productos piloto."}
+                   </p>
                 </div>
               </div>
             </div>
           </CardContent>
+          <div className="bg-white/5 border-t border-white/5 py-4 px-8 flex justify-between items-center">
+             <div className="flex items-center gap-3">
+                <div className="flex -space-x-2">
+                   {[1,2,3].map(i => <div key={i} className={`w-6 h-6 rounded-full border-2 border-slate-900 bg-slate-${6+i}00`} />)}
+                </div>
+                <span className="text-[10px] text-slate-500 font-bold uppercase">Procesado por MOTOR NEURONAL v4.2</span>
+             </div>
+             <Badge className="bg-indigo-600 hover:bg-indigo-700 text-[9px] font-black pointer-events-none">RESULTADOS GARANTIZADOS</Badge>
+          </div>
         </Card>
 
         {/* Main Content Tabs */}
@@ -1300,12 +1357,12 @@ export default function App() {
                       </div>
                       <Badge className="bg-blue-500 text-[9px]">ACTIVO</Badge>
                     </div>
-                    <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-lg flex items-center justify-between opacity-50">
+                    <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-lg flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <Database className="w-4 h-4 text-indigo-600" />
-                        <span className="text-xs font-bold text-indigo-800">Webhook (Make)</span>
+                        <Database className="w-4 h-4 text-emerald-600" />
+                        <span className="text-xs font-bold text-emerald-800">Webhook (Make)</span>
                       </div>
-                      <Badge className="bg-slate-400 text-[9px]">DESCONECTADO</Badge>
+                      <Badge className="bg-emerald-600 text-[9px]">CONECTADO</Badge>
                     </div>
                   </CardContent>
                 </Card>
